@@ -2,8 +2,16 @@ import { randomBytes } from "node:crypto";
 import cookie from "@fastify/cookie";
 import { and, eq } from "drizzle-orm";
 import Fastify, { type FastifyRequest } from "fastify";
-import { assertCanApply, ConflictError, createApplication } from "./applications.ts";
+import {
+  assertCanApply,
+  ConflictError,
+  createApplication,
+  inviteToInterview,
+  rejectApplication,
+  resolveInterview,
+} from "./applications.ts";
 import type { Db } from "./db/index.ts";
+import type { FeedbackChecker } from "./feedback.ts";
 import { applications, jobs, users } from "./db/schema.ts";
 import { type LoginGateway, type OrderGateway, PayPalError } from "./paypal.ts";
 import type { PaymentGateway } from "./poller.ts";
@@ -26,6 +34,7 @@ class HttpError extends Error {
 export function createApp(deps: {
   db: Db;
   payments: PaymentGateway & OrderGateway & LoginGateway;
+  feedback: FeedbackChecker;
   sessionSecret: string;
   appUrl: string;
   demoModeEnabled: boolean;
@@ -68,6 +77,18 @@ export function createApp(deps: {
     const user = await currentUser(request);
     if (user.role !== role) throw new HttpError(403, "This account can't do that");
     return user;
+  }
+
+  // Applications to the recruiter's own roles only.
+  async function recruiterApplication(request: FastifyRequest<{ Params: { id: string } }>) {
+    const recruiter = await requireUser(request, "RECRUITER");
+    const [row] = await db
+      .select({ application: applications, job: jobs })
+      .from(applications)
+      .innerJoin(jobs, eq(applications.jobId, jobs.id))
+      .where(and(eq(applications.id, request.params.id), eq(jobs.recruiterId, recruiter.id)));
+    if (!row) throw new HttpError(404, "Application not found");
+    return row;
   }
 
   app.get("/api/health", async () => ({ status: "ok" }));
@@ -259,6 +280,100 @@ export function createApp(deps: {
         if (error instanceof ConflictError) await payments.voidAuthorization(hold.authorizationId);
         throw error;
       }
+    },
+  );
+
+  const idParams = {
+    type: "object",
+    properties: { id: { type: "string", format: "uuid" } },
+  } as const;
+
+  app.post<{ Params: { id: string }; Body: { unmetRequirement: string; feedback: string } }>(
+    "/api/applications/:id/reject",
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: "object",
+          required: ["unmetRequirement", "feedback"],
+          properties: {
+            unmetRequirement: { type: "string", minLength: 1 },
+            feedback: { type: "string", minLength: 1, maxLength: 2000 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { application, job } = await recruiterApplication(request);
+      const now = new Date();
+      // Checked before Elastic so a late reply doesn't spend an Elastic call.
+      if (application.status !== "ACTIVE" || application.expiresAt <= now) {
+        throw new ConflictError("This application can no longer be rejected");
+      }
+
+      const unmetRequirement = request.body.unmetRequirement.trim();
+      if (!job.requirementsText.toLowerCase().includes(unmetRequirement.toLowerCase())) {
+        return reply.status(422).send({ error: "Pick a requirement from the role's listing." });
+      }
+
+      const verdict = await deps.feedback.check({
+        feedback: request.body.feedback,
+        resumeText: application.resumeText,
+        requirementsText: job.requirementsText,
+      });
+      if (!verdict.passed) return reply.status(422).send({ error: verdict.reason });
+
+      return rejectApplication(db, {
+        id: application.id,
+        unmetRequirement,
+        feedback: request.body.feedback,
+        qualityScore: verdict.qualityScore,
+        now: new Date(),
+      });
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { interviewAt: string } }>(
+    "/api/applications/:id/invite",
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: "object",
+          required: ["interviewAt"],
+          properties: { interviewAt: { type: "string", format: "date-time" } },
+        },
+      },
+    },
+    async (request) => {
+      const { application } = await recruiterApplication(request);
+      const now = new Date();
+      const interviewAt = new Date(request.body.interviewAt);
+      if (interviewAt <= now) throw new HttpError(422, "Pick an interview time in the future");
+      return inviteToInterview(db, { id: application.id, interviewAt, now });
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { genuine: boolean } }>(
+    "/api/applications/:id/confirm-interview",
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: "object",
+          required: ["genuine"],
+          properties: { genuine: { type: "boolean" } },
+        },
+      },
+    },
+    async (request) => {
+      const candidate = await requireUser(request, "CANDIDATE");
+      const [application] = await db
+        .select({ id: applications.id })
+        .from(applications)
+        .where(and(eq(applications.id, request.params.id), eq(applications.candidateId, candidate.id)));
+      if (!application) throw new HttpError(404, "Application not found");
+      return resolveInterview(db, { id: application.id, genuine: request.body.genuine });
     },
   );
 

@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { createApp } from "./app.ts";
 import * as schema from "./db/schema.ts";
+import { createElasticFeedbackChecker } from "./feedback.ts";
 import { createPayPalGateway } from "./paypal.ts";
 import { startPoller } from "./poller.ts";
 
@@ -23,9 +24,15 @@ const payments = createPayPalGateway({
   clientSecret: requireEnv("PAYPAL_CLIENT_SECRET"),
 });
 
+const feedback = createElasticFeedbackChecker({
+  url: requireEnv("ELASTIC_URL"),
+  apiKey: requireEnv("ELASTIC_API_KEY"),
+});
+
 const app = createApp({
   db,
   payments,
+  feedback,
   sessionSecret: requireEnv("SESSION_SECRET"),
   appUrl: requireEnv("APP_URL"),
   demoModeEnabled: process.env.DEMO_MODE_ENABLED === "true",
