@@ -82,6 +82,7 @@ beforeEach(async () => {
     db,
     payments,
     feedback,
+    paypalClientId: "CLIENT-ID",
     sessionSecret: "test-secret",
     appUrl: "https://quidly.test",
     demoModeEnabled: false,
@@ -427,5 +428,32 @@ describe("responding to an application", () => {
     const body = { genuine: true };
     expect((await post(`/api/applications/${id}/confirm-interview`, other.cookie, body)).statusCode).toBe(404);
     expect((await post(`/api/applications/${id}/confirm-interview`, candidateCookie, body)).statusCode).toBe(409);
+  });
+});
+
+describe("listing roles and applications", () => {
+  function get(url: string, cookie?: string) {
+    return app.inject({ method: "GET", url, headers: cookie ? { cookie } : {} });
+  }
+
+  it("lists only open roles", async () => {
+    const openJob = await fundedJob();
+    await post("/api/jobs", recruiterCookie, { title: "Draft", requirementsText: "Go", applicantCap: 1 });
+    const response = await get("/api/jobs");
+    expect(response.json().map((job: { id: string }) => job.id)).toEqual([openJob]);
+  });
+
+  it("shows each side only its own roles and applications", async () => {
+    const jobId = await fundedJob();
+    await post(`/api/jobs/${jobId}/applications`, candidateCookie, applyBody);
+    const other = await login("RECRUITER", "other-hr@example.com");
+
+    const mine = (await get("/api/my/jobs", recruiterCookie)).json();
+    expect(mine[0].applications).toHaveLength(1);
+    expect((await get("/api/my/jobs", other.cookie)).json()).toEqual([]);
+
+    const applied = (await get("/api/my/applications", candidateCookie)).json();
+    expect(applied[0]).toMatchObject({ jobTitle: "Senior Backend Engineer", status: "ACTIVE" });
+    expect((await get("/api/my/applications", recruiterCookie)).statusCode).toBe(403);
   });
 });

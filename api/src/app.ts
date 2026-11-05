@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import cookie from "@fastify/cookie";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import Fastify, { type FastifyRequest } from "fastify";
 import {
   assertCanApply,
@@ -35,6 +35,7 @@ export function createApp(deps: {
   db: Db;
   payments: PaymentGateway & OrderGateway & LoginGateway;
   feedback: FeedbackChecker;
+  paypalClientId: string;
   sessionSecret: string;
   appUrl: string;
   demoModeEnabled: boolean;
@@ -92,6 +93,47 @@ export function createApp(deps: {
   }
 
   app.get("/api/health", async () => ({ status: "ok" }));
+
+  // The client ID is public: the PayPal button needs it in the browser.
+  app.get("/api/config", async () => ({ paypalClientId: deps.paypalClientId, demoModeEnabled }));
+
+  app.get("/api/jobs", async () =>
+    db
+      .select({
+        id: jobs.id,
+        title: jobs.title,
+        requirementsText: jobs.requirementsText,
+        applicantCap: jobs.applicantCap,
+      })
+      .from(jobs)
+      .where(eq(jobs.status, "OPEN")),
+  );
+
+  app.get("/api/my/jobs", async (request) => {
+    const recruiter = await requireUser(request, "RECRUITER");
+    const myJobs = await db.select().from(jobs).where(eq(jobs.recruiterId, recruiter.id));
+    const rows = await db
+      .select({ application: applications })
+      .from(applications)
+      .innerJoin(jobs, eq(applications.jobId, jobs.id))
+      .where(eq(jobs.recruiterId, recruiter.id))
+      .orderBy(asc(applications.createdAt));
+    return myJobs.map((job) => ({
+      ...job,
+      applications: rows.map((row) => row.application).filter((application) => application.jobId === job.id),
+    }));
+  });
+
+  app.get("/api/my/applications", async (request) => {
+    const candidate = await requireUser(request, "CANDIDATE");
+    const rows = await db
+      .select({ application: applications, jobTitle: jobs.title })
+      .from(applications)
+      .innerJoin(jobs, eq(applications.jobId, jobs.id))
+      .where(eq(applications.candidateId, candidate.id))
+      .orderBy(asc(applications.createdAt));
+    return rows.map((row) => ({ ...row.application, jobTitle: row.jobTitle }));
+  });
 
   app.get<{ Querystring: { role: "CANDIDATE" | "RECRUITER" } }>(
     "/api/auth/paypal",

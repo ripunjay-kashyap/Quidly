@@ -17,10 +17,11 @@ function requireEnv(name: string): string {
 const db = drizzle(requireEnv("DATABASE_URL"), { schema, casing: "snake_case" });
 await migrate(db, { migrationsFolder: "./drizzle" });
 
+const paypalClientId = requireEnv("PAYPAL_CLIENT_ID");
 const payments = createPayPalGateway({
   baseUrl: "https://api-m.sandbox.paypal.com",
   loginBaseUrl: "https://www.sandbox.paypal.com",
-  clientId: requireEnv("PAYPAL_CLIENT_ID"),
+  clientId: paypalClientId,
   clientSecret: requireEnv("PAYPAL_CLIENT_SECRET"),
 });
 
@@ -33,6 +34,7 @@ const app = createApp({
   db,
   payments,
   feedback,
+  paypalClientId,
   sessionSecret: requireEnv("SESSION_SECRET"),
   appUrl: requireEnv("APP_URL"),
   demoModeEnabled: process.env.DEMO_MODE_ENABLED === "true",
