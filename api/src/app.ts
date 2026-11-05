@@ -1,15 +1,18 @@
+import { randomBytes } from "node:crypto";
 import cookie from "@fastify/cookie";
 import { and, eq } from "drizzle-orm";
 import Fastify, { type FastifyRequest } from "fastify";
 import { assertCanApply, ConflictError, createApplication } from "./applications.ts";
 import type { Db } from "./db/index.ts";
 import { applications, jobs, users } from "./db/schema.ts";
-import { type OrderGateway, PayPalError } from "./paypal.ts";
+import { type LoginGateway, type OrderGateway, PayPalError } from "./paypal.ts";
 import type { PaymentGateway } from "./poller.ts";
 
 const LISTING_FEE = 49;
 const BOND_PER_APPLICANT = 5;
 const HOLD_AMOUNT = "2.00";
+const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+const LOGIN_STATE_MAX_AGE_SECONDS = 10 * 60;
 
 class HttpError extends Error {
   readonly statusCode: number;
@@ -22,11 +25,20 @@ class HttpError extends Error {
 
 export function createApp(deps: {
   db: Db;
-  payments: PaymentGateway & OrderGateway;
+  payments: PaymentGateway & OrderGateway & LoginGateway;
   sessionSecret: string;
+  appUrl: string;
   demoModeEnabled: boolean;
 }) {
-  const { db, payments, demoModeEnabled } = deps;
+  const { db, payments, demoModeEnabled, appUrl } = deps;
+  const loginRedirectUri = `${appUrl}/api/auth/paypal/callback`;
+  const cookieOptions = {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: appUrl.startsWith("https://"),
+    signed: true,
+  } as const;
   const app = Fastify({ logger: process.env.NODE_ENV === "production" });
   app.register(cookie, { secret: deps.sessionSecret });
 
@@ -43,17 +55,90 @@ export function createApp(deps: {
     return reply.status(500).send({ error: "Something went wrong" });
   });
 
-  async function requireUser(request: FastifyRequest, role: "CANDIDATE" | "RECRUITER") {
+  async function currentUser(request: FastifyRequest) {
     const session = request.unsignCookie(request.cookies.session ?? "");
     if (!session.valid || !session.value) throw new HttpError(401, "Log in first");
 
     const [user] = await db.select().from(users).where(eq(users.id, session.value));
     if (!user) throw new HttpError(401, "Log in first");
+    return user;
+  }
+
+  async function requireUser(request: FastifyRequest, role: "CANDIDATE" | "RECRUITER") {
+    const user = await currentUser(request);
     if (user.role !== role) throw new HttpError(403, "This account can't do that");
     return user;
   }
 
   app.get("/api/health", async () => ({ status: "ok" }));
+
+  app.get<{ Querystring: { role: "CANDIDATE" | "RECRUITER" } }>(
+    "/api/auth/paypal",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          required: ["role"],
+          properties: { role: { type: "string", enum: ["CANDIDATE", "RECRUITER"] } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const state = randomBytes(16).toString("hex");
+      reply.setCookie("login_state", `${state}:${request.query.role}`, {
+        ...cookieOptions,
+        maxAge: LOGIN_STATE_MAX_AGE_SECONDS,
+      });
+      return reply.redirect(payments.loginUrl(state, loginRedirectUri));
+    },
+  );
+
+  app.get<{ Querystring: { code?: string; state?: string } }>(
+    "/api/auth/paypal/callback",
+    async (request, reply) => {
+      const stored = request.unsignCookie(request.cookies.login_state ?? "");
+      reply.clearCookie("login_state", { path: "/" });
+
+      const [state, role] = stored.value?.split(":") ?? [];
+      const { code } = request.query;
+      if (!stored.valid || !state || state !== request.query.state || !code) {
+        return reply.redirect("/?login=failed");
+      }
+
+      try {
+        const profile = await payments.getLoginProfile(code);
+        // A returning user keeps their role, whichever login button they pressed.
+        const [user] = await db
+          .insert(users)
+          .values({
+            role: role as "CANDIDATE" | "RECRUITER",
+            email: profile.email,
+            paypalPayerId: profile.payerId,
+            paypalVerified: profile.verified,
+          })
+          .onConflictDoUpdate({
+            target: users.paypalPayerId,
+            set: { email: profile.email, paypalVerified: profile.verified },
+          })
+          .returning();
+        reply.setCookie("session", user.id, { ...cookieOptions, maxAge: SESSION_MAX_AGE_SECONDS });
+        return reply.redirect("/");
+      } catch (error) {
+        request.log.error(error);
+        return reply.redirect("/?login=failed");
+      }
+    },
+  );
+
+  app.post("/api/auth/logout", async (_request, reply) => {
+    reply.clearCookie("session", { path: "/" });
+    return { status: "ok" };
+  });
+
+  app.get("/api/me", async (request) => {
+    const { id, role, email, companyName, paypalVerified, availableSlots } = await currentUser(request);
+    return { id, role, email, companyName, paypalVerified, availableSlots };
+  });
 
   app.post<{ Body: { title: string; requirementsText: string; applicantCap: number } }>(
     "/api/jobs",

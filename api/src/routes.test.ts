@@ -22,6 +22,8 @@ const payments = {
   voidAuthorization: vi.fn(),
   sendPayout: vi.fn(),
   getPayoutStatus: vi.fn(),
+  loginUrl: vi.fn(),
+  getLoginProfile: vi.fn(),
 };
 
 async function login(role: "CANDIDATE" | "RECRUITER", email: string) {
@@ -66,7 +68,20 @@ beforeEach(async () => {
     return { authorizationId: `AUTH-${holdCounter}`, value: "2.00" };
   });
 
-  app = createApp({ db, payments, sessionSecret: "test-secret", demoModeEnabled: false });
+  payments.loginUrl.mockImplementation((state: string) => `https://paypal.test/login?state=${state}`);
+  payments.getLoginProfile.mockResolvedValue({
+    payerId: "PAYER-1",
+    email: "new@example.com",
+    verified: true,
+  });
+
+  app = createApp({
+    db,
+    payments,
+    sessionSecret: "test-secret",
+    appUrl: "https://quidly.test",
+    demoModeEnabled: false,
+  });
   await app.ready();
 
   recruiterCookie = (await login("RECRUITER", "hr@example.com")).cookie;
@@ -88,6 +103,95 @@ describe("sessions", () => {
     const jobId = await fundedJob();
     const response = await post(`/api/jobs/${jobId}/applications/order`, recruiterCookie);
     expect(response.statusCode).toBe(403);
+  });
+});
+
+describe("logging in with PayPal", () => {
+  async function startLogin(role: string) {
+    const response = await app.inject({ method: "GET", url: `/api/auth/paypal?role=${role}` });
+    const state = new URL(response.headers.location as string).searchParams.get("state");
+    const stateCookie = response.cookies.find((entry) => entry.name === "login_state")!;
+    return { state, cookie: `login_state=${encodeURIComponent(stateCookie.value)}` };
+  }
+
+  function callback(query: string, cookie?: string) {
+    return app.inject({
+      method: "GET",
+      url: `/api/auth/paypal/callback?${query}`,
+      headers: cookie ? { cookie } : {},
+    });
+  }
+
+  async function finishLogin(role: string) {
+    const { state, cookie } = await startLogin(role);
+    return callback(`code=CODE&state=${state}`, cookie);
+  }
+
+  function sessionFrom(response: Awaited<ReturnType<typeof callback>>) {
+    const session = response.cookies.find((entry) => entry.name === "session")!;
+    return `session=${encodeURIComponent(session.value)}`;
+  }
+
+  it("creates a user with the chosen role and logs them in", async () => {
+    const response = await finishLogin("RECRUITER");
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("/");
+    expect(payments.loginUrl).toHaveBeenCalledWith(
+      expect.any(String),
+      "https://quidly.test/api/auth/paypal/callback",
+    );
+
+    const me = await app.inject({ method: "GET", url: "/api/me", headers: { cookie: sessionFrom(response) } });
+    expect(me.json()).toMatchObject({ role: "RECRUITER", email: "new@example.com", paypalVerified: true });
+  });
+
+  it("keeps a returning user's role and updates their email", async () => {
+    await finishLogin("CANDIDATE");
+    payments.getLoginProfile.mockResolvedValue({
+      payerId: "PAYER-1",
+      email: "changed@example.com",
+      verified: true,
+    });
+    const response = await finishLogin("RECRUITER");
+
+    const me = await app.inject({ method: "GET", url: "/api/me", headers: { cookie: sessionFrom(response) } });
+    expect(me.json()).toMatchObject({ role: "CANDIDATE", email: "changed@example.com" });
+  });
+
+  it("refuses a callback with a wrong state or no state cookie", async () => {
+    const { cookie } = await startLogin("CANDIDATE");
+    for (const response of [await callback("code=CODE&state=wrong", cookie), await callback("code=CODE&state=x")]) {
+      expect(response.headers.location).toBe("/?login=failed");
+    }
+    expect(payments.getLoginProfile).not.toHaveBeenCalled();
+  });
+
+  it("refuses a forged state cookie", async () => {
+    const response = await callback("code=CODE&state=abc", "login_state=abc:RECRUITER");
+    expect(response.headers.location).toBe("/?login=failed");
+    expect(payments.getLoginProfile).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed login when the user cancels or PayPal fails", async () => {
+    const { state, cookie } = await startLogin("CANDIDATE");
+    const cancelled = await callback(`error=access_denied&state=${state}`, cookie);
+    expect(cancelled.headers.location).toBe("/?login=failed");
+
+    payments.getLoginProfile.mockRejectedValue(new Error("PayPal is down"));
+    const failed = await finishLogin("CANDIDATE");
+    expect(failed.headers.location).toBe("/?login=failed");
+    expect(failed.cookies.find((entry) => entry.name === "session")).toBeUndefined();
+  });
+
+  it("rejects an unknown role", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/auth/paypal?role=ADMIN" });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("logs out", async () => {
+    const response = await app.inject({ method: "POST", url: "/api/auth/logout" });
+    expect(response.cookies.find((entry) => entry.name === "session")?.value).toBe("");
+    expect((await app.inject({ method: "GET", url: "/api/me" })).statusCode).toBe(401);
   });
 });
 

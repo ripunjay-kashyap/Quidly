@@ -20,11 +20,17 @@ export interface OrderGateway {
   authorizeOrder(orderId: string): Promise<{ authorizationId: string; value: string }>;
 }
 
+export interface LoginGateway {
+  loginUrl(state: string, redirectUri: string): string;
+  getLoginProfile(code: string): Promise<{ payerId: string; email: string; verified: boolean }>;
+}
+
 export function createPayPalGateway(config: {
   baseUrl: string;
+  loginBaseUrl: string;
   clientId: string;
   clientSecret: string;
-}): PaymentGateway & OrderGateway {
+}): PaymentGateway & OrderGateway & LoginGateway {
   let token: { value: string; expiresAt: number } | undefined;
 
   async function getToken(): Promise<string> {
@@ -68,6 +74,46 @@ export function createPayPalGateway(config: {
   }
 
   return {
+    loginUrl(state, redirectUri) {
+      const query = new URLSearchParams({
+        client_id: config.clientId,
+        response_type: "code",
+        scope: "openid email profile",
+        redirect_uri: redirectUri,
+        state,
+      });
+      return `${config.loginBaseUrl}/signin/authorize?${query}`;
+    },
+
+    async getLoginProfile(code) {
+      const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
+      const tokenResponse = await fetch(`${config.baseUrl}/v1/oauth2/token`, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ grant_type: "authorization_code", code }),
+      });
+      const tokens = await tokenResponse.json();
+      if (!tokenResponse.ok) throw new PayPalError("/v1/oauth2/token", tokenResponse.status, tokens);
+
+      const path = "/v1/identity/oauth2/userinfo?schema=paypalv1.1";
+      const profileResponse = await fetch(`${config.baseUrl}${path}`, {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
+      const profile = await profileResponse.json();
+      if (!profileResponse.ok) throw new PayPalError(path, profileResponse.status, profile);
+
+      const email = profile.emails?.find((entry: any) => entry.primary)?.value ?? profile.emails?.[0]?.value;
+      if (!email) throw new PayPalError(path, profileResponse.status, { error: "no email returned" });
+      return {
+        payerId: profile.payer_id ?? profile.user_id,
+        email,
+        verified: String(profile.verified_account) === "true",
+      };
+    },
+
     async createOrder(intent, value) {
       const order = await request("POST", "/v2/checkout/orders", {
         intent,

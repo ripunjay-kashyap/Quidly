@@ -18,6 +18,7 @@ await migrate(db, { migrationsFolder: "./drizzle" });
 
 const payments = createPayPalGateway({
   baseUrl: "https://api-m.sandbox.paypal.com",
+  loginBaseUrl: "https://www.sandbox.paypal.com",
   clientId: requireEnv("PAYPAL_CLIENT_ID"),
   clientSecret: requireEnv("PAYPAL_CLIENT_SECRET"),
 });
@@ -26,6 +27,7 @@ const app = createApp({
   db,
   payments,
   sessionSecret: requireEnv("SESSION_SECRET"),
+  appUrl: requireEnv("APP_URL"),
   demoModeEnabled: process.env.DEMO_MODE_ENABLED === "true",
 });
 
