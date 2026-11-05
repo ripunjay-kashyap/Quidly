@@ -8,9 +8,11 @@
     "typecheck": "tsc --noEmit",
     "spike:paypal": "node --env-file=.env scripts/paypal-spike.ts",
     "test": "vitest run",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "spike:elastic": "node --env-file=.env scripts/elastic-spike.ts"
   },
   "dependencies": {
+    "@elastic/elasticsearch": "^9.5.1",
     "drizzle-orm": "^0.45.4",
     "fastify": "^5.12.8",
     "pg": "^8.23.1"
