@@ -1,0 +1,1 @@
+ALTER TABLE "jobs" DROP COLUMN "listing_capture_id";

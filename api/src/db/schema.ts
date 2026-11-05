@@ -47,7 +47,8 @@ export const jobs = pgTable("jobs", {
   title: text().notNull(),
   requirementsText: text().notNull(),
   applicantCap: integer().notNull(),
-  listingCaptureId: text(),
+  fundingOrderId: text(),
+  // One capture holds both the listing fee and the bond.
   bondCaptureId: text(),
   bondTotal: numeric({ precision: 10, scale: 2 }).notNull().default("0"),
   bondForfeited: numeric({ precision: 10, scale: 2 }).notNull().default("0"),
@@ -66,7 +67,7 @@ export const applications = pgTable(
       .notNull()
       .references(() => users.id),
     resumeText: text().notNull(),
-    paypalAuthId: text().notNull(),
+    paypalAuthId: text().notNull().unique(),
     // Set once the hold is confirmed void, so a failed void can be retried.
     holdVoidedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),

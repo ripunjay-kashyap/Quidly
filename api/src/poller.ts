@@ -104,3 +104,16 @@ export async function runPollerTick(db: Db, payments: PaymentGateway, now: Date)
   await sendQueuedPayouts(db, payments);
   await refreshPayoutStatuses(db, payments);
 }
+
+// Schedules the next tick only after the last one finishes, so ticks can't overlap.
+export function startPoller(db: Db, payments: PaymentGateway, intervalMs: number): void {
+  const tick = async () => {
+    try {
+      await runPollerTick(db, payments, new Date());
+    } catch (error) {
+      console.error("Poller tick failed; will retry", error);
+    }
+    setTimeout(tick, intervalMs);
+  };
+  void tick();
+}

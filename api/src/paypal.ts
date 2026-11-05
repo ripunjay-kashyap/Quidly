@@ -13,11 +13,18 @@ export class PayPalError extends Error {
   }
 }
 
+export interface OrderGateway {
+  createOrder(intent: "CAPTURE" | "AUTHORIZE", value: string): Promise<string>;
+  // Both are safe to retry: PayPal returns the original result for the same order.
+  captureOrder(orderId: string): Promise<{ captureId: string; status: string }>;
+  authorizeOrder(orderId: string): Promise<{ authorizationId: string; value: string }>;
+}
+
 export function createPayPalGateway(config: {
   baseUrl: string;
   clientId: string;
   clientSecret: string;
-}): PaymentGateway {
+}): PaymentGateway & OrderGateway {
   let token: { value: string; expiresAt: number } | undefined;
 
   async function getToken(): Promise<string> {
@@ -39,10 +46,19 @@ export function createPayPalGateway(config: {
     return token.value;
   }
 
-  async function request(method: "GET" | "POST", path: string, body?: unknown): Promise<any> {
+  async function request(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    requestId?: string,
+  ): Promise<any> {
     const response = await fetch(`${config.baseUrl}${path}`, {
       method,
-      headers: { Authorization: `Bearer ${await getToken()}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${await getToken()}`,
+        "Content-Type": "application/json",
+        ...(requestId ? { "PayPal-Request-Id": requestId } : {}),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await response.text();
@@ -52,6 +68,36 @@ export function createPayPalGateway(config: {
   }
 
   return {
+    async createOrder(intent, value) {
+      const order = await request("POST", "/v2/checkout/orders", {
+        intent,
+        purchase_units: [{ amount: { currency_code: "USD", value } }],
+      });
+      return order.id;
+    },
+
+    async captureOrder(orderId) {
+      const order = await request(
+        "POST",
+        `/v2/checkout/orders/${orderId}/capture`,
+        {},
+        `capture-${orderId}`,
+      );
+      const capture = order.purchase_units[0].payments.captures[0];
+      return { captureId: capture.id, status: capture.status };
+    },
+
+    async authorizeOrder(orderId) {
+      const order = await request(
+        "POST",
+        `/v2/checkout/orders/${orderId}/authorize`,
+        {},
+        `authorize-${orderId}`,
+      );
+      const authorization = order.purchase_units[0].payments.authorizations[0];
+      return { authorizationId: authorization.id, value: authorization.amount.value };
+    },
+
     async voidAuthorization(authorizationId) {
       try {
         await request("POST", `/v2/payments/authorizations/${authorizationId}/void`);

@@ -16,6 +16,29 @@ export async function freeSlot(tx: Tx, candidateId: string): Promise<void> {
     .where(eq(users.id, candidateId));
 }
 
+// Refuses early, before the candidate is asked to approve a hold.
+export async function assertCanApply(db: Db, jobId: string, candidateId: string): Promise<void> {
+  const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+  if (job?.status !== "OPEN") throw new ConflictError("This role is not open");
+
+  const [applicants] = await db
+    .select({ total: count() })
+    .from(applications)
+    .where(eq(applications.jobId, jobId));
+  if (applicants.total >= job.applicantCap) throw new ConflictError("This role is full");
+
+  const [candidate] = await db.select().from(users).where(eq(users.id, candidateId));
+  if (!candidate || candidate.availableSlots < 1) {
+    throw new ConflictError("No application slots available");
+  }
+
+  const [existing] = await db
+    .select({ id: applications.id })
+    .from(applications)
+    .where(and(eq(applications.jobId, jobId), eq(applications.candidateId, candidateId)));
+  if (existing) throw new ConflictError("You have already applied to this role");
+}
+
 // The hold is placed before this runs, so the caller must void it if this throws.
 export async function createApplication(
   db: Db,
