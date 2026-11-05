@@ -6,13 +6,21 @@
     "dev": "node --watch --env-file-if-exists=.env src/index.ts",
     "start": "node src/index.ts",
     "typecheck": "tsc --noEmit",
-    "spike:paypal": "node --env-file=.env scripts/paypal-spike.ts"
+    "spike:paypal": "node --env-file=.env scripts/paypal-spike.ts",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
-    "fastify": "^5.12.8"
+    "drizzle-orm": "^0.45.4",
+    "fastify": "^5.12.8",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
     "@types/node": "^26.6.6",
-    "typescript": "^7.0.2"
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
   }
 }

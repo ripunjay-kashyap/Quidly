@@ -117,16 +117,17 @@ const payout = await paypal("POST", "/v1/payments/payouts", {
 const batchId = payout.batch_header.payout_batch_id;
 console.log(`PASS  payout batch created ${batchId} (${payout.batch_header.batch_status})`);
 
-let batchStatus = "";
+// A batch can succeed while its item fails, so the item status is what counts.
+let itemStatus = "";
 for (let attempt = 0; attempt < 12; attempt += 1) {
   const batch = await paypal("GET", `/v1/payments/payouts/${batchId}`);
-  batchStatus = batch.batch_header.batch_status;
-  console.log(`      batch status: ${batchStatus}`);
-  if (batchStatus !== "PENDING" && batchStatus !== "PROCESSING") break;
+  itemStatus = batch.items?.[0]?.transaction_status ?? "";
+  console.log(`      batch: ${batch.batch_header.batch_status}, item: ${itemStatus || "not ready"}`);
+  if (itemStatus && itemStatus !== "PENDING" && itemStatus !== "ONHOLD") break;
   await new Promise((resolve) => setTimeout(resolve, 5000));
 }
-if (batchStatus !== "SUCCESS") {
-  throw new Error(`Payout did not succeed; last status was ${batchStatus}`);
+if (itemStatus !== "SUCCESS") {
+  throw new Error(`Payout did not succeed; last item status was ${itemStatus || "not ready"}`);
 }
 console.log("PASS  payout settled");
 

@@ -1,0 +1,394 @@
+{
+  "id": "d2fabc1c-59b8-4723-92f1-78020923daf7",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.applications": {
+      "name": "applications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "candidate_id": {
+          "name": "candidate_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resume_text": {
+          "name": "resume_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "paypal_auth_id": {
+          "name": "paypal_auth_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hold_voided_at": {
+          "name": "hold_voided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "application_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ACTIVE'"
+        },
+        "unmet_requirement": {
+          "name": "unmet_requirement",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recruiter_feedback": {
+          "name": "recruiter_feedback",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "interview_at": {
+          "name": "interview_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "elastic_match_score": {
+          "name": "elastic_match_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "elastic_quality_score": {
+          "name": "elastic_quality_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "candidate_flagged": {
+          "name": "candidate_flagged",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "payout_batch_id": {
+          "name": "payout_batch_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payout_status": {
+          "name": "payout_status",
+          "type": "payout_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "applications_job_id_jobs_id_fk": {
+          "name": "applications_job_id_jobs_id_fk",
+          "tableFrom": "applications",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "applications_candidate_id_users_id_fk": {
+          "name": "applications_candidate_id_users_id_fk",
+          "tableFrom": "applications",
+          "tableTo": "users",
+          "columnsFrom": [
+            "candidate_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "one_application_per_job": {
+          "name": "one_application_per_job",
+          "nullsNotDistinct": false,
+          "columns": [
+            "job_id",
+            "candidate_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.jobs": {
+      "name": "jobs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "recruiter_id": {
+          "name": "recruiter_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requirements_text": {
+          "name": "requirements_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "applicant_cap": {
+          "name": "applicant_cap",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "listing_capture_id": {
+          "name": "listing_capture_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bond_capture_id": {
+          "name": "bond_capture_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bond_total": {
+          "name": "bond_total",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "bond_forfeited": {
+          "name": "bond_forfeited",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "bond_refunded": {
+          "name": "bond_refunded",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "status": {
+          "name": "status",
+          "type": "job_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'DRAFT'"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "jobs_recruiter_id_users_id_fk": {
+          "name": "jobs_recruiter_id_users_id_fk",
+          "tableFrom": "jobs",
+          "tableTo": "users",
+          "columnsFrom": [
+            "recruiter_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "role": {
+          "name": "role",
+          "type": "user_role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "company_name": {
+          "name": "company_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paypal_payer_id": {
+          "name": "paypal_payer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paypal_verified": {
+          "name": "paypal_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "available_slots": {
+          "name": "available_slots",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 5
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_email_unique": {
+          "name": "users_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        },
+        "users_paypalPayerId_unique": {
+          "name": "users_paypalPayerId_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "paypal_payer_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "available_slots_not_negative": {
+          "name": "available_slots_not_negative",
+          "value": "\"users\".\"available_slots\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.application_status": {
+      "name": "application_status",
+      "schema": "public",
+      "values": [
+        "ACTIVE",
+        "REJECTED_RELEASED",
+        "INTERVIEW_PENDING",
+        "INTERVIEW_CONFIRMED",
+        "DISPUTED",
+        "GHOSTED_PAID_OUT"
+      ]
+    },
+    "public.job_status": {
+      "name": "job_status",
+      "schema": "public",
+      "values": [
+        "DRAFT",
+        "OPEN",
+        "CLOSED"
+      ]
+    },
+    "public.payout_status": {
+      "name": "payout_status",
+      "schema": "public",
+      "values": [
+        "QUEUED",
+        "PENDING",
+        "SUCCESS",
+        "FAILED"
+      ]
+    },
+    "public.user_role": {
+      "name": "user_role",
+      "schema": "public",
+      "values": [
+        "CANDIDATE",
+        "RECRUITER"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
