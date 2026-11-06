@@ -24,6 +24,7 @@ export function errorMessage(error: unknown): string {
 }
 
 export type User = {
+  id: string;
   role: "CANDIDATE" | "RECRUITER";
   email: string;
   companyName: string | null;
@@ -34,6 +35,13 @@ export type Config = {
   demoModeEnabled: boolean;
   industries: string[];
   companySizes: string[];
+};
+
+export type Profile = {
+  resumeText: string | null;
+  resumeFileName: string | null;
+  portfolioUrl: string | null;
+  targetRoles: string | null;
 };
 
 export type Listing = {
@@ -63,10 +71,53 @@ export type Application = {
   unmetRequirement: string | null;
   recruiterFeedback: string | null;
   payoutStatus: string | null;
+  createdAt: string;
 };
 
-export function timeLeft(expiresAt: string, now: number): string {
-  const seconds = Math.max(0, Math.round((new Date(expiresAt).getTime() - now) / 1000));
-  if (seconds < 120) return `${seconds}s left`;
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m left`;
+export function msLeft(expiresAt: string, now: number): number {
+  return Math.max(0, new Date(expiresAt).getTime() - now);
+}
+
+// "51h 07m", then "4m 09s" in the last hour, so short demo deadlines still tick.
+export function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  if (minutes > 0) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  return `${seconds % 60}s`;
+}
+
+// "51:07:09"
+export function formatClock(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  return [Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60), seconds % 60]
+    .map((part) => String(part).padStart(2, "0"))
+    .join(":");
+}
+
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+export function money(amount: number | string): string {
+  return `$${Number(amount).toFixed(2)}`;
+}
+
+// Listings write requirements as a comma-separated list.
+export function splitRequirements(text: string): string[] {
+  return text
+    .split(/[\n,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }

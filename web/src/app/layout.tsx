@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { AuthDialogProvider } from "@/lib/auth-dialog";
+import { SessionProvider } from "@/lib/use-session";
+import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
 
 const geistSans = Geist({
@@ -14,23 +17,29 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Quidly",
-  description: "Job listings with a guaranteed response, backed by PayPal.",
+  title: {
+    default: "Quidly: every job application gets an answer",
+    template: "%s · Quidly",
+  },
+  description:
+    "Companies on Quidly reply within 72 hours with real feedback or an interview invite. If they don't, you get $5 through PayPal.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      data-scroll-behavior="smooth"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased motion-safe:scroll-smooth`}
     >
-      <body className="min-h-full flex flex-col">
-        <SiteHeader />
-        {children}
-        <footer className="mx-auto w-full max-w-3xl px-4 py-6 text-sm">
-          Built with PayPal (payments, holds and payouts), Elastic (feedback checks), Render (backend) and Vercel.
-          Payments run in PayPal&apos;s sandbox.
-        </footer>
+      <body className="flex min-h-full flex-col">
+        <SessionProvider>
+          <AuthDialogProvider>
+            <SiteHeader />
+            <div className="flex flex-1 flex-col">{children}</div>
+            <SiteFooter />
+          </AuthDialogProvider>
+        </SessionProvider>
       </body>
     </html>
   );
