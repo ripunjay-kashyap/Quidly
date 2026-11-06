@@ -18,6 +18,8 @@ export interface OrderGateway {
   // Both are safe to retry: PayPal returns the original result for the same order.
   captureOrder(orderId: string): Promise<{ captureId: string; status: string }>;
   authorizeOrder(orderId: string): Promise<{ authorizationId: string; value: string }>;
+  // Safe to retry with the same requestId: PayPal returns the original refund.
+  refundCapture(captureId: string, value: string, requestId: string): Promise<{ status: string }>;
 }
 
 export interface LoginGateway {
@@ -142,6 +144,16 @@ export function createPayPalGateway(config: {
       );
       const authorization = order.purchase_units[0].payments.authorizations[0];
       return { authorizationId: authorization.id, value: authorization.amount.value };
+    },
+
+    async refundCapture(captureId, value, requestId) {
+      const refund = await request(
+        "POST",
+        `/v2/payments/captures/${captureId}/refund`,
+        { amount: { currency_code: "USD", value } },
+        requestId,
+      );
+      return { status: refund.status };
     },
 
     async voidAuthorization(authorizationId) {

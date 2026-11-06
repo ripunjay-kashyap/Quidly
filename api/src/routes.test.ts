@@ -19,6 +19,7 @@ const payments = {
   createOrder: vi.fn(),
   captureOrder: vi.fn(),
   authorizeOrder: vi.fn(),
+  refundCapture: vi.fn(),
   voidAuthorization: vi.fn(),
   sendPayout: vi.fn(),
   getPayoutStatus: vi.fn(),
@@ -76,6 +77,7 @@ beforeEach(async () => {
     verified: true,
   });
 
+  payments.refundCapture.mockResolvedValue({ status: "COMPLETED" });
   feedback.check.mockResolvedValue({ passed: true, qualityScore: 0.6 });
 
   app = createApp({
@@ -455,5 +457,73 @@ describe("listing roles and applications", () => {
     const applied = (await get("/api/my/applications", candidateCookie)).json();
     expect(applied[0]).toMatchObject({ jobTitle: "Senior Backend Engineer", status: "ACTIVE" });
     expect((await get("/api/my/applications", recruiterCookie)).statusCode).toBe(403);
+  });
+});
+
+describe("closing a role", () => {
+  async function applyAs(email: string, jobId: string): Promise<string> {
+    const candidate = await login("CANDIDATE", email);
+    const response = await post(`/api/jobs/${jobId}/applications`, candidate.cookie, applyBody);
+    return response.json().id;
+  }
+
+  it("refunds the bond minus ghosting penalties and disputed invites", async () => {
+    const jobId = await fundedJob(10);
+    const ghosted = await applyAs("a@example.com", jobId);
+    const disputed = await applyAs("b@example.com", jobId);
+    await applyAs("c@example.com", jobId).then((id) =>
+      db.update(applications).set({ status: "REJECTED_RELEASED" }).where(eq(applications.id, id)),
+    );
+    await db.update(applications).set({ status: "GHOSTED_PAID_OUT" }).where(eq(applications.id, ghosted));
+    await db.update(jobs).set({ bondForfeited: "5.00" }).where(eq(jobs.id, jobId));
+    await db.update(applications).set({ status: "DISPUTED" }).where(eq(applications.id, disputed));
+
+    const response = await post(`/api/jobs/${jobId}/close`, recruiterCookie);
+    expect(response.json()).toMatchObject({ status: "CLOSED", bondRefunded: "40.00" });
+    expect(payments.refundCapture).toHaveBeenCalledWith("CAPTURE-1", "40.00", `refund-${jobId}`);
+  });
+
+  it("doesn't refund twice when closed again", async () => {
+    const jobId = await fundedJob(2);
+    await post(`/api/jobs/${jobId}/close`, recruiterCookie);
+    const again = await post(`/api/jobs/${jobId}/close`, recruiterCookie);
+    expect(again.json().bondRefunded).toBe("10.00");
+    expect(payments.refundCapture).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a refund that failed, with the same request ID", async () => {
+    const jobId = await fundedJob(2);
+    payments.refundCapture.mockRejectedValueOnce(new Error("PayPal is down"));
+    expect((await post(`/api/jobs/${jobId}/close`, recruiterCookie)).statusCode).toBe(500);
+
+    const retry = await post(`/api/jobs/${jobId}/close`, recruiterCookie);
+    expect(retry.json()).toMatchObject({ status: "CLOSED", bondRefunded: "10.00" });
+    expect(payments.refundCapture).toHaveBeenLastCalledWith("CAPTURE-1", "10.00", `refund-${jobId}`);
+  });
+
+  it("refuses while an application still needs a response, and stays open", async () => {
+    const jobId = await fundedJob();
+    await post(`/api/jobs/${jobId}/applications`, candidateCookie, applyBody);
+    expect((await post(`/api/jobs/${jobId}/close`, recruiterCookie)).statusCode).toBe(409);
+
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    expect(job.status).toBe("OPEN");
+    expect(payments.refundCapture).not.toHaveBeenCalled();
+  });
+
+  it("stops applications once closed", async () => {
+    const jobId = await fundedJob();
+    await post(`/api/jobs/${jobId}/close`, recruiterCookie);
+    const order = await post(`/api/jobs/${jobId}/applications/order`, candidateCookie);
+    expect(order.statusCode).toBe(409);
+  });
+
+  it("refuses a draft and hides other recruiters' roles", async () => {
+    const created = await post("/api/jobs", recruiterCookie, { title: "Draft", requirementsText: "Go", applicantCap: 1 });
+    expect((await post(`/api/jobs/${created.json().jobId}/close`, recruiterCookie)).statusCode).toBe(409);
+
+    const jobId = await fundedJob();
+    const other = await login("RECRUITER", "other-hr@example.com");
+    expect((await post(`/api/jobs/${jobId}/close`, other.cookie)).statusCode).toBe(404);
   });
 });

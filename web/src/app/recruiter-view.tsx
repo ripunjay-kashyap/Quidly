@@ -11,6 +11,8 @@ type Job = {
   applicantCap: number;
   status: string;
   bondTotal: string;
+  bondForfeited: string;
+  bondRefunded: string;
   applications: Application[];
 };
 
@@ -24,6 +26,17 @@ export function RecruiterView({ config }: { config: Config }) {
   );
   const [cap, setCap] = useState(10);
   const fundingJobId = useRef("");
+
+  async function closeRole(jobId: string) {
+    setMessage("");
+    try {
+      const closed = await post<{ bondRefunded: string }>(`/api/jobs/${jobId}/close`);
+      setMessage(`Role closed. $${closed.bondRefunded} of the bond was refunded.`);
+      refresh();
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
+  }
 
   function refresh() {
     get<Job[]>("/api/my/jobs")
@@ -100,8 +113,14 @@ export function RecruiterView({ config }: { config: Config }) {
         {jobs.map((job) => (
           <div key={job.id} className="flex flex-col gap-2 border p-3">
             <p>
-              <strong>{job.title}</strong> · {job.status} · cap {job.applicantCap} · bond ${job.bondTotal}
+              <strong>{job.title}</strong> · {job.status} · cap {job.applicantCap} · bond ${job.bondTotal} ·
+              forfeited ${job.bondForfeited} · refunded ${job.bondRefunded}
             </p>
+            {job.status === "OPEN" && (
+              <button className="self-start border px-3 py-1" onClick={() => closeRole(job.id)}>
+                Close role and refund the unused bond
+              </button>
+            )}
             <p>{job.requirementsText}</p>
             {job.applications.length === 0 && <p>No applicants yet.</p>}
             {job.applications.map((application) => (

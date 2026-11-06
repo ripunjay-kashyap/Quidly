@@ -1,9 +1,10 @@
-import { and, count, eq, gt, gte, sql } from "drizzle-orm";
+import { and, count, eq, gt, gte, inArray, sql } from "drizzle-orm";
 import type { Db } from "./db/index.ts";
 import { applications, jobs, users } from "./db/schema.ts";
 
 const RESPONSE_WINDOW_MS = 72 * 60 * 60 * 1000;
 const DEMO_RESPONSE_WINDOW_MS = 90 * 1000;
+const BOND_PER_APPLICANT_CENTS = 500;
 
 export class ConflictError extends Error {}
 
@@ -149,5 +150,40 @@ export async function resolveInterview(db: Db, input: { id: string; genuine: boo
 
     if (input.genuine) await freeSlot(tx, application.candidateId);
     return application;
+  });
+}
+
+const cents = (value: string) => Math.round(Number(value) * 100);
+
+// Closes the role in a transaction that locks it, so no application can arrive
+// while it closes. The caller refunds afterwards, and can retry a failed refund.
+export async function closeJob(db: Db, input: { jobId: string; recruiterId: string }) {
+  return db.transaction(async (tx) => {
+    const [job] = await tx
+      .select()
+      .from(jobs)
+      .where(and(eq(jobs.id, input.jobId), eq(jobs.recruiterId, input.recruiterId)))
+      .for("update");
+    if (!job) return undefined;
+    if (job.status === "DRAFT") throw new ConflictError("This role was never funded");
+
+    const [unresolved] = await tx
+      .select({ total: count() })
+      .from(applications)
+      .where(and(eq(applications.jobId, job.id), inArray(applications.status, ["ACTIVE", "INTERVIEW_PENDING"])));
+    if (unresolved.total > 0) {
+      throw new ConflictError("Respond to every application before closing this role");
+    }
+
+    // A disputed application keeps its $5 locked, so it isn't refunded.
+    const [disputed] = await tx
+      .select({ total: count() })
+      .from(applications)
+      .where(and(eq(applications.jobId, job.id), eq(applications.status, "DISPUTED")));
+
+    const [closed] = await tx.update(jobs).set({ status: "CLOSED" }).where(eq(jobs.id, job.id)).returning();
+    const refundCents =
+      cents(closed.bondTotal) - cents(closed.bondForfeited) - disputed.total * BOND_PER_APPLICANT_CENTS;
+    return { job: closed, refund: (Math.max(0, refundCents) / 100).toFixed(2) };
   });
 }

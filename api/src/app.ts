@@ -4,6 +4,7 @@ import { and, asc, eq } from "drizzle-orm";
 import Fastify, { type FastifyRequest } from "fastify";
 import {
   assertCanApply,
+  closeJob,
   ConflictError,
   createApplication,
   inviteToInterview,
@@ -261,6 +262,25 @@ export function createApp(deps: {
       .where(and(eq(jobs.id, job.id), eq(jobs.status, "DRAFT")))
       .returning();
     return { jobId: job.id, status: opened?.status ?? "OPEN" };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/jobs/:id/close", async (request) => {
+    const recruiter = await requireUser(request, "RECRUITER");
+    const closed = await closeJob(db, { jobId: request.params.id, recruiterId: recruiter.id });
+    if (!closed) throw new HttpError(404, "Role not found");
+
+    const { job, refund } = closed;
+    if (job.bondRefunded !== "0.00" || refund === "0.00") {
+      return { jobId: job.id, status: job.status, bondRefunded: job.bondRefunded };
+    }
+
+    // The fixed request ID makes a retried close return the same refund.
+    const result = await payments.refundCapture(job.bondCaptureId!, refund, `refund-${job.id}`);
+    if (result.status !== "COMPLETED" && result.status !== "PENDING") {
+      throw new ConflictError(`The refund is ${result.status.toLowerCase()}, so try closing again`);
+    }
+    await db.update(jobs).set({ bondRefunded: refund }).where(eq(jobs.id, job.id));
+    return { jobId: job.id, status: job.status, bondRefunded: refund };
   });
 
   app.post<{ Params: { id: string } }>("/api/jobs/:id/applications/order", async (request, reply) => {
