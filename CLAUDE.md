@@ -6,6 +6,7 @@ Guaranteed-response job board for a hackathon, built around PayPal.
 Local developer docs, not tracked in git:
 - `docs/implementation-plan.md`: stack, deployment, money rules, schedule and cut list
 - `docs/roughplan.md`: product spec, outcomes, data model, endpoints and demo script
+- `docs/handoff.md`: current progress, uncommitted work and next steps
 
 ## Layout
 - `web/`: Next.js frontend on Vercel. Read `web/AGENTS.md` before changing it.
