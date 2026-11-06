@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { createApp } from "./app.ts";
 import * as schema from "./db/schema.ts";
+import { websiteIsReachable } from "./company.ts";
 import { createElasticFeedbackChecker } from "./feedback.ts";
 import { createPayPalGateway } from "./paypal.ts";
 import { startPoller } from "./poller.ts";
@@ -35,6 +36,7 @@ const app = createApp({
   payments,
   feedback,
   paypalClientId,
+  checkWebsite: websiteIsReachable,
   sessionSecret: requireEnv("SESSION_SECRET"),
   appUrl: requireEnv("APP_URL"),
   demoModeEnabled: process.env.DEMO_MODE_ENABLED === "true",

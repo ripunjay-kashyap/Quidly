@@ -23,8 +23,35 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export type User = { role: "CANDIDATE" | "RECRUITER"; email: string; availableSlots: number };
-export type Config = { paypalClientId: string; demoModeEnabled: boolean };
+export type User = {
+  role: "CANDIDATE" | "RECRUITER";
+  email: string;
+  companyName: string | null;
+  availableSlots: number;
+};
+export type Config = {
+  paypalClientId: string;
+  demoModeEnabled: boolean;
+  industries: string[];
+  companySizes: string[];
+};
+
+export type Listing = {
+  id: string;
+  title: string;
+  description: string;
+  requirementsText: string;
+  location: string;
+  employmentType: string;
+  salaryRange: string | null;
+  applicantCap: number;
+  applicantCount: number;
+  status: string;
+  companyId: string;
+  companyName: string;
+  companyVerified: boolean;
+  isSample: boolean;
+};
 
 export type Application = {
   id: string;

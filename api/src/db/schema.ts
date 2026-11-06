@@ -32,6 +32,14 @@ export const users = pgTable(
     role: userRole().notNull(),
     email: text().notNull().unique(),
     companyName: text(),
+    companyWebsite: text(),
+    companyIndustry: text(),
+    companySize: text(),
+    companyDescription: text(),
+    // Set by the automatic checks when the company's website is reachable.
+    companyVerified: boolean().notNull().default(false),
+    // Seeded demo companies, labelled "Sample listing" on the site.
+    isSample: boolean().notNull().default(false),
     paypalPayerId: text().unique(),
     paypalVerified: boolean().notNull().default(false),
     availableSlots: integer().notNull().default(5),
@@ -46,6 +54,11 @@ export const jobs = pgTable("jobs", {
     .references(() => users.id),
   title: text().notNull(),
   requirementsText: text().notNull(),
+  description: text().notNull().default(""),
+  location: text().notNull().default("Remote"),
+  employmentType: text().notNull().default("Full-time"),
+  salaryRange: text(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   applicantCap: integer().notNull(),
   fundingOrderId: text(),
   // One capture holds both the listing fee and the bond.

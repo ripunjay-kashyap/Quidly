@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import cookie from "@fastify/cookie";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
 import Fastify, { type FastifyRequest } from "fastify";
 import {
   assertCanApply,
@@ -11,6 +11,7 @@ import {
   rejectApplication,
   resolveInterview,
 } from "./applications.ts";
+import { COMPANY_SIZES, type CompanyInput, companyProblems, INDUSTRIES, normalizeWebsite } from "./company.ts";
 import type { Db } from "./db/index.ts";
 import type { FeedbackChecker } from "./feedback.ts";
 import { applications, jobs, users } from "./db/schema.ts";
@@ -37,6 +38,7 @@ export function createApp(deps: {
   payments: PaymentGateway & OrderGateway & LoginGateway;
   feedback: FeedbackChecker;
   paypalClientId: string;
+  checkWebsite: (origin: string) => Promise<boolean>;
   sessionSecret: string;
   appUrl: string;
   demoModeEnabled: boolean;
@@ -96,18 +98,127 @@ export function createApp(deps: {
   app.get("/api/health", async () => ({ status: "ok" }));
 
   // The client ID is public: the PayPal button needs it in the browser.
-  app.get("/api/config", async () => ({ paypalClientId: deps.paypalClientId, demoModeEnabled }));
+  app.get("/api/config", async () => ({
+    paypalClientId: deps.paypalClientId,
+    demoModeEnabled,
+    industries: INDUSTRIES,
+    companySizes: COMPANY_SIZES,
+  }));
+
+  const companyFields = {
+    companyName: users.companyName,
+    companyWebsite: users.companyWebsite,
+    companyIndustry: users.companyIndustry,
+    companySize: users.companySize,
+    companyDescription: users.companyDescription,
+    companyVerified: users.companyVerified,
+    isSample: users.isSample,
+  };
+
+  const listingFields = {
+    id: jobs.id,
+    title: jobs.title,
+    description: jobs.description,
+    requirementsText: jobs.requirementsText,
+    location: jobs.location,
+    employmentType: jobs.employmentType,
+    salaryRange: jobs.salaryRange,
+    applicantCap: jobs.applicantCap,
+    status: jobs.status,
+    createdAt: jobs.createdAt,
+    applicantCount: sql<number>`(select count(*)::int from ${applications} where ${applications.jobId} = ${jobs.id})`,
+    companyId: users.id,
+    companyName: users.companyName,
+    companyVerified: users.companyVerified,
+    isSample: users.isSample,
+  };
 
   app.get("/api/jobs", async () =>
     db
-      .select({
-        id: jobs.id,
-        title: jobs.title,
-        requirementsText: jobs.requirementsText,
-        applicantCap: jobs.applicantCap,
-      })
+      .select(listingFields)
       .from(jobs)
-      .where(eq(jobs.status, "OPEN")),
+      .innerJoin(users, eq(jobs.recruiterId, users.id))
+      .where(eq(jobs.status, "OPEN"))
+      .orderBy(desc(jobs.createdAt)),
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/api/jobs/:id",
+    { schema: { params: { type: "object", properties: { id: { type: "string", format: "uuid" } } } } },
+    async (request) => {
+      const [job] = await db
+        .select(listingFields)
+        .from(jobs)
+        .innerJoin(users, eq(jobs.recruiterId, users.id))
+        .where(and(eq(jobs.id, request.params.id), sql`${jobs.status} <> 'DRAFT'`));
+      if (!job) throw new HttpError(404, "Role not found");
+      return job;
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/api/companies/:id",
+    { schema: { params: { type: "object", properties: { id: { type: "string", format: "uuid" } } } } },
+    async (request) => {
+      const [company] = await db
+        .select({ id: users.id, ...companyFields })
+        .from(users)
+        .where(and(eq(users.id, request.params.id), eq(users.role, "RECRUITER"), isNotNull(users.companyName)));
+      if (!company) throw new HttpError(404, "Company not found");
+
+      const openRoles = await db
+        .select(listingFields)
+        .from(jobs)
+        .innerJoin(users, eq(jobs.recruiterId, users.id))
+        .where(and(eq(jobs.recruiterId, company.id), eq(jobs.status, "OPEN")))
+        .orderBy(desc(jobs.createdAt));
+      return { ...company, openRoles };
+    },
+  );
+
+  app.get("/api/company", async (request) => {
+    const recruiter = await requireUser(request, "RECRUITER");
+    const [company] = await db.select(companyFields).from(users).where(eq(users.id, recruiter.id));
+    return company;
+  });
+
+  app.put<{ Body: CompanyInput }>(
+    "/api/company",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["name", "industry", "size", "description"],
+          properties: {
+            name: { type: "string", maxLength: 80 },
+            website: { type: "string", maxLength: 200 },
+            industry: { type: "string" },
+            size: { type: "string" },
+            description: { type: "string", maxLength: 2000 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const recruiter = await requireUser(request, "RECRUITER");
+      const problems = companyProblems(request.body);
+      if (problems.length > 0) return reply.status(422).send({ error: problems.join(" "), problems });
+
+      const website = request.body.website ? normalizeWebsite(request.body.website) : undefined;
+      const [company] = await db
+        .update(users)
+        .set({
+          companyName: request.body.name.trim(),
+          companyWebsite: website ?? null,
+          companyIndustry: request.body.industry,
+          companySize: request.body.size,
+          companyDescription: request.body.description.trim(),
+          companyVerified: website ? await deps.checkWebsite(website) : false,
+        })
+        .where(eq(users.id, recruiter.id))
+        .returning(companyFields);
+      return company;
+    },
   );
 
   app.get("/api/my/jobs", async (request) => {
@@ -204,7 +315,17 @@ export function createApp(deps: {
     return { id, role, email, companyName, paypalVerified, availableSlots };
   });
 
-  app.post<{ Body: { title: string; requirementsText: string; applicantCap: number } }>(
+  app.post<{
+    Body: {
+      title: string;
+      requirementsText: string;
+      applicantCap: number;
+      description?: string;
+      location?: string;
+      employmentType?: string;
+      salaryRange?: string;
+    };
+  }>(
     "/api/jobs",
     {
       schema: {
@@ -212,16 +333,22 @@ export function createApp(deps: {
           type: "object",
           required: ["title", "requirementsText", "applicantCap"],
           properties: {
-            title: { type: "string", minLength: 1 },
-            requirementsText: { type: "string", minLength: 1 },
+            title: { type: "string", minLength: 1, maxLength: 120 },
+            requirementsText: { type: "string", minLength: 1, maxLength: 2000 },
             applicantCap: { type: "integer", minimum: 1, maximum: 500 },
+            description: { type: "string", maxLength: 4000 },
+            location: { type: "string", minLength: 1, maxLength: 120 },
+            employmentType: { type: "string", enum: ["Full-time", "Part-time", "Contract", "Internship"] },
+            salaryRange: { type: "string", maxLength: 80 },
           },
         },
       },
     },
     async (request, reply) => {
       const recruiter = await requireUser(request, "RECRUITER");
-      const { title, requirementsText, applicantCap } = request.body;
+      if (!recruiter.companyName) throw new ConflictError("Set up your company profile before posting a role");
+      const { title, requirementsText, applicantCap, description, location, employmentType, salaryRange } =
+        request.body;
       const bondTotal = applicantCap * BOND_PER_APPLICANT;
       const total = (LISTING_FEE + bondTotal).toFixed(2);
       const orderId = await payments.createOrder("CAPTURE", total);
@@ -233,6 +360,10 @@ export function createApp(deps: {
           title,
           requirementsText,
           applicantCap,
+          description,
+          location,
+          employmentType,
+          salaryRange: salaryRange || null,
           bondTotal: bondTotal.toFixed(2),
           fundingOrderId: orderId,
         })

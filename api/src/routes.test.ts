@@ -27,9 +27,11 @@ const payments = {
   getLoginProfile: vi.fn(),
 };
 const feedback = { check: vi.fn() };
+const checkWebsite = vi.fn();
 
 async function login(role: "CANDIDATE" | "RECRUITER", email: string) {
-  const [user] = await db.insert(users).values({ role, email }).returning();
+  const companyName = role === "RECRUITER" ? `Company ${email}` : null;
+  const [user] = await db.insert(users).values({ role, email, companyName }).returning();
   return { id: user.id, cookie: `session=${encodeURIComponent(app.signCookie(user.id))}` };
 }
 
@@ -78,6 +80,7 @@ beforeEach(async () => {
   });
 
   payments.refundCapture.mockResolvedValue({ status: "COMPLETED" });
+  checkWebsite.mockResolvedValue(true);
   feedback.check.mockResolvedValue({ passed: true, qualityScore: 0.6 });
 
   app = createApp({
@@ -85,6 +88,7 @@ beforeEach(async () => {
     payments,
     feedback,
     paypalClientId: "CLIENT-ID",
+    checkWebsite,
     sessionSecret: "test-secret",
     appUrl: "https://quidly.test",
     demoModeEnabled: false,
@@ -525,5 +529,76 @@ describe("closing a role", () => {
     const jobId = await fundedJob();
     const other = await login("RECRUITER", "other-hr@example.com");
     expect((await post(`/api/jobs/${jobId}/close`, other.cookie)).statusCode).toBe(404);
+  });
+});
+
+describe("company profiles", () => {
+  const profile = {
+    name: "Northwind Labs",
+    website: "https://northwind.example/careers",
+    industry: "Software",
+    size: "51-200",
+    description:
+      "We build scheduling software for clinics, and our small platform team runs the payment and booking systems.",
+  };
+
+  function put(cookie: string, payload: object) {
+    return app.inject({ method: "PUT", url: "/api/company", headers: { cookie }, payload });
+  }
+
+  it("saves a complete profile and verifies a reachable website", async () => {
+    const response = await put(recruiterCookie, profile);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      companyName: "Northwind Labs",
+      companyWebsite: "https://northwind.example",
+      companyVerified: true,
+    });
+    expect(checkWebsite).toHaveBeenCalledWith("https://northwind.example");
+  });
+
+  it("saves without the badge when there's no website or it's unreachable", async () => {
+    expect((await put(recruiterCookie, { ...profile, website: "" })).json().companyVerified).toBe(false);
+    checkWebsite.mockResolvedValue(false);
+    expect((await put(recruiterCookie, profile)).json().companyVerified).toBe(false);
+  });
+
+  it("lists every problem with an incomplete profile", async () => {
+    const response = await put(recruiterCookie, {
+      name: "N",
+      website: "not a url",
+      industry: "Gambling",
+      size: "huge",
+      description: "We hire.",
+    });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().problems).toHaveLength(5);
+    expect(checkWebsite).not.toHaveBeenCalled();
+  });
+
+  it("needs a profile before a role can be posted", async () => {
+    const fresh = await db.insert(users).values({ role: "RECRUITER", email: "new@example.com" }).returning();
+    const cookie = `session=${encodeURIComponent(app.signCookie(fresh[0].id))}`;
+    const body = { title: "Role", requirementsText: "Go", applicantCap: 1 };
+    expect((await post("/api/jobs", cookie, body)).statusCode).toBe(409);
+    expect(payments.createOrder).not.toHaveBeenCalled();
+  });
+
+  it("shows a public company page with its open roles", async () => {
+    await put(recruiterCookie, profile);
+    const jobId = await fundedJob();
+    const [recruiter] = await db.select().from(users).where(eq(users.email, "hr@example.com"));
+
+    const page = await app.inject({ method: "GET", url: `/api/companies/${recruiter.id}` });
+    expect(page.json()).toMatchObject({ companyName: "Northwind Labs", companyVerified: true });
+    expect(page.json().openRoles.map((role: { id: string }) => role.id)).toEqual([jobId]);
+    expect((await app.inject({ method: "GET", url: `/api/companies/${candidateId}` })).statusCode).toBe(404);
+  });
+
+  it("shows a listing's company and spots taken", async () => {
+    const jobId = await fundedJob(3);
+    await post(`/api/jobs/${jobId}/applications`, candidateCookie, applyBody);
+    const listing = (await app.inject({ method: "GET", url: `/api/jobs/${jobId}` })).json();
+    expect(listing).toMatchObject({ applicantCap: 3, applicantCount: 1, companyName: "Company hr@example.com" });
   });
 });

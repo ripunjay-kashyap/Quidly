@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { type Application, type Config, errorMessage, get, post, timeLeft } from "@/lib/api";
 import { PayPalButton } from "@/lib/paypal-button";
@@ -25,6 +26,12 @@ export function RecruiterView({ config }: { config: Config }) {
     "5+ years of backend development, Go, PostgreSQL, running production Kubernetes clusters, on-call experience",
   );
   const [cap, setCap] = useState(10);
+  const [description, setDescription] = useState(
+    "Join the platform team that runs our payment and booking systems. You'll own services end to end, from design to on-call.",
+  );
+  const [location, setLocation] = useState("Remote (US)");
+  const [employmentType, setEmploymentType] = useState("Full-time");
+  const [salaryRange, setSalaryRange] = useState("$150k–$180k");
   const fundingJobId = useRef("");
 
   async function closeRole(jobId: string) {
@@ -65,6 +72,35 @@ export function RecruiterView({ config }: { config: Config }) {
           <input className="border p-1" value={title} onChange={(event) => setTitle(event.target.value)} />
         </label>
         <label className="flex flex-col">
+          About the role
+          <textarea
+            className="border p-1"
+            rows={3}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+        </label>
+        <label className="flex flex-col">
+          Location
+          <input className="border p-1" value={location} onChange={(event) => setLocation(event.target.value)} />
+        </label>
+        <label className="flex flex-col">
+          Employment type
+          <select
+            className="border p-1"
+            value={employmentType}
+            onChange={(event) => setEmploymentType(event.target.value)}
+          >
+            {["Full-time", "Part-time", "Contract", "Internship"].map((option) => (
+              <option key={option}>{option}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col">
+          Salary range (optional)
+          <input className="border p-1" value={salaryRange} onChange={(event) => setSalaryRange(event.target.value)} />
+        </label>
+        <label className="flex flex-col">
           Requirements
           <textarea
             className="border p-1"
@@ -94,6 +130,10 @@ export function RecruiterView({ config }: { config: Config }) {
               title,
               requirementsText: requirements,
               applicantCap: cap,
+              description,
+              location,
+              employmentType,
+              salaryRange,
             });
             fundingJobId.current = created.jobId;
             return created.orderId;
@@ -113,7 +153,10 @@ export function RecruiterView({ config }: { config: Config }) {
         {jobs.map((job) => (
           <div key={job.id} className="flex flex-col gap-2 border p-3">
             <p>
-              <strong>{job.title}</strong> · {job.status} · cap {job.applicantCap} · bond ${job.bondTotal} ·
+              <Link className="font-semibold underline" href={`/jobs/${job.id}`}>
+                {job.title}
+              </Link>{" "}
+              · {job.status} · cap {job.applicantCap} · bond ${job.bondTotal} ·
               forfeited ${job.bondForfeited} · refunded ${job.bondRefunded}
             </p>
             {job.status === "OPEN" && (
