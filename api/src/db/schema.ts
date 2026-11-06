@@ -43,6 +43,10 @@ export const users = pgTable(
     paypalPayerId: text().unique(),
     paypalVerified: boolean().notNull().default(false),
     availableSlots: integer().notNull().default(5),
+    resumeText: text(),
+    resumeFileName: text(),
+    portfolioUrl: text(),
+    targetRoles: text(),
   },
   (table) => [check("available_slots_not_negative", sql`${table.availableSlots} >= 0`)],
 );

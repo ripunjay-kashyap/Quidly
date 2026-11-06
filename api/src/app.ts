@@ -14,6 +14,7 @@ import {
 import { COMPANY_SIZES, type CompanyInput, companyProblems, INDUSTRIES, normalizeWebsite } from "./company.ts";
 import type { Db } from "./db/index.ts";
 import type { FeedbackChecker } from "./feedback.ts";
+import { extractResumeText, MAX_RESUME_BYTES, MAX_RESUME_CHARS, ResumeError } from "./resume.ts";
 import { applications, jobs, users } from "./db/schema.ts";
 import { type LoginGateway, type OrderGateway, PayPalError } from "./paypal.ts";
 import type { PaymentGateway } from "./poller.ts";
@@ -57,6 +58,7 @@ export function createApp(deps: {
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ConflictError) return reply.status(409).send({ error: error.message });
+    if (error instanceof ResumeError) return reply.status(422).send({ error: error.message });
     if (error instanceof HttpError) return reply.status(error.statusCode).send({ error: error.message });
     if (error instanceof PayPalError) {
       request.log.error(error);
@@ -96,6 +98,74 @@ export function createApp(deps: {
   }
 
   app.get("/api/health", async () => ({ status: "ok" }));
+
+  app.addContentTypeParser("application/pdf", { parseAs: "buffer", bodyLimit: MAX_RESUME_BYTES }, (_request, body, done) =>
+    done(null, body),
+  );
+
+  const profileFields = {
+    resumeText: users.resumeText,
+    resumeFileName: users.resumeFileName,
+    portfolioUrl: users.portfolioUrl,
+    targetRoles: users.targetRoles,
+  };
+
+  app.get("/api/profile", async (request) => {
+    const candidate = await requireUser(request, "CANDIDATE");
+    const [profile] = await db.select(profileFields).from(users).where(eq(users.id, candidate.id));
+    return profile;
+  });
+
+  // The browser sends the PDF itself as the body, with its name in a header.
+  app.post<{ Body: Buffer }>("/api/profile/resume", async (request) => {
+    const candidate = await requireUser(request, "CANDIDATE");
+    if (!Buffer.isBuffer(request.body)) throw new ResumeError("Upload your resume as a PDF.");
+    const resumeText = await extractResumeText(request.body);
+    const fileName = String(request.headers["x-file-name"] ?? "resume.pdf").slice(0, 120);
+
+    const [profile] = await db
+      .update(users)
+      .set({ resumeText, resumeFileName: decodeURIComponent(fileName) })
+      .where(eq(users.id, candidate.id))
+      .returning(profileFields);
+    return profile;
+  });
+
+  app.put<{ Body: { resumeText: string; portfolioUrl: string; targetRoles: string } }>(
+    "/api/profile",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["resumeText", "portfolioUrl", "targetRoles"],
+          properties: {
+            resumeText: { type: "string", maxLength: MAX_RESUME_CHARS },
+            portfolioUrl: { type: "string", maxLength: 200 },
+            targetRoles: { type: "string", maxLength: 200 },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const candidate = await requireUser(request, "CANDIDATE");
+      const { resumeText, portfolioUrl, targetRoles } = request.body;
+      const portfolio = portfolioUrl.trim();
+      if (portfolio && !/^https?:\/\/[^\s]+$/.test(portfolio)) {
+        throw new HttpError(422, "Enter the portfolio link as a full address, such as https://example.com.");
+      }
+
+      const [profile] = await db
+        .update(users)
+        .set({
+          resumeText: resumeText.trim() || null,
+          portfolioUrl: portfolio || null,
+          targetRoles: targetRoles.trim() || null,
+        })
+        .where(eq(users.id, candidate.id))
+        .returning(profileFields);
+      return profile;
+    },
+  );
 
   // The client ID is public: the PayPal button needs it in the browser.
   app.get("/api/config", async () => ({

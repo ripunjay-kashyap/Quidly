@@ -602,3 +602,71 @@ describe("company profiles", () => {
     expect(listing).toMatchObject({ applicantCap: 3, applicantCount: 1, companyName: "Company hr@example.com" });
   });
 });
+
+describe("candidate profiles", () => {
+  const RESUME_PDF = Buffer.from(
+    [
+      "%PDF-1.4",
+      "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+      "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj",
+      "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 600 100]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj",
+      "4 0 obj<</Length 88>>stream",
+      "BT /F1 10 Tf 20 50 Td (Backend engineer with six years of Go and Postgres at a fintech startup.) Tj ET",
+      "endstream endobj",
+      "5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj",
+      "trailer<</Root 1 0 R>>",
+      "%%EOF",
+    ].join("\n"),
+  );
+
+  function upload(cookie: string, body: Buffer, type = "application/pdf") {
+    return app.inject({
+      method: "POST",
+      url: "/api/profile/resume",
+      headers: { cookie, "content-type": type, "x-file-name": encodeURIComponent("Jane Résumé.pdf") },
+      payload: body,
+    });
+  }
+
+  it("extracts and saves the text of an uploaded PDF", async () => {
+    const response = await upload(candidateCookie, RESUME_PDF);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().resumeText).toContain("six years of Go and Postgres");
+    expect(response.json().resumeFileName).toBe("Jane Résumé.pdf");
+
+    const profile = await app.inject({ method: "GET", url: "/api/profile", headers: { cookie: candidateCookie } });
+    expect(profile.json().resumeText).toContain("fintech startup");
+  });
+
+  it("refuses a file that isn't a PDF", async () => {
+    const response = await upload(candidateCookie, Buffer.from("just some text pretending to be a resume file"));
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error).toBe("Upload your resume as a PDF.");
+  });
+
+  it("refuses a PDF with no readable text", async () => {
+    const empty = Buffer.from(RESUME_PDF.toString("latin1").replace(/\(Backend[^)]*\)/, "()"), "latin1");
+    expect((await upload(candidateCookie, empty)).statusCode).toBe(422);
+  });
+
+  it("saves edits, the portfolio link and target roles", async () => {
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      headers: { cookie: candidateCookie },
+      payload: { resumeText: " Edited resume ", portfolioUrl: "https://jane.dev", targetRoles: "Backend, Platform" },
+    });
+    expect(response.json()).toMatchObject({
+      resumeText: "Edited resume",
+      portfolioUrl: "https://jane.dev",
+      targetRoles: "Backend, Platform",
+    });
+  });
+
+  it("refuses a portfolio link that isn't a web address, and companies", async () => {
+    const payload = { resumeText: "", portfolioUrl: "javascript:alert(1)", targetRoles: "" };
+    const bad = await app.inject({ method: "PUT", url: "/api/profile", headers: { cookie: candidateCookie }, payload });
+    expect(bad.statusCode).toBe(422);
+    expect((await upload(recruiterCookie, RESUME_PDF)).statusCode).toBe(403);
+  });
+});
