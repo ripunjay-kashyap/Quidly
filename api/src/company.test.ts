@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { normalizeWebsite, websiteIsReachable } from "./company.ts";
+import { companyProblems, normalizeWebsite, websiteIsReachable } from "./company.ts";
+
+describe("company description check", () => {
+  const base = { name: "Acme", industry: "Software", size: "1-10" };
+
+  it("accepts short, plain company copy", () => {
+    const description =
+      "Larkspur Legal Tech helps small law firms manage contracts. Our software finds key dates and clauses so nothing slips through.";
+    expect(companyProblems({ ...base, description })).toEqual([]);
+  });
+
+  it("refuses a keyword list", () => {
+    const description = "Payments platform fintech startup Go Kubernetes Postgres remote-first engineering culture growth.";
+    expect(companyProblems({ ...base, description })).toHaveLength(1);
+  });
+});
 
 describe("company website checks", () => {
   it("keeps only the site's origin and refuses other protocols", () => {

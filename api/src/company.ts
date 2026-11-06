@@ -16,6 +16,8 @@ export const INDUSTRIES = [
 ];
 export const COMPANY_SIZES = ["1-10", "11-50", "51-200", "201-1000", "1000+"];
 const MIN_DESCRIPTION_LENGTH = 80;
+// Short company copy uses fewer joining words than feedback, but a keyword list has none.
+const MIN_DESCRIPTION_FUNCTION_WORDS = 2;
 const WEBSITE_TIMEOUT_MS = 5000;
 
 export type CompanyInput = {
@@ -33,7 +35,7 @@ export function companyProblems(input: CompanyInput): string[] {
   if (!INDUSTRIES.includes(input.industry)) problems.push("Pick an industry.");
   if (!COMPANY_SIZES.includes(input.size)) problems.push("Pick a company size.");
   const description = input.description.trim();
-  if (description.length < MIN_DESCRIPTION_LENGTH || !readsAsSentences(description)) {
+  if (description.length < MIN_DESCRIPTION_LENGTH || !readsAsSentences(description, MIN_DESCRIPTION_FUNCTION_WORDS)) {
     problems.push(`Describe the company in full sentences (at least ${MIN_DESCRIPTION_LENGTH} characters).`);
   }
   if (input.website && !normalizeWebsite(input.website)) {

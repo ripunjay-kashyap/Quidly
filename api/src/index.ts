@@ -6,6 +6,7 @@ import { websiteIsReachable } from "./company.ts";
 import { createElasticFeedbackChecker } from "./feedback.ts";
 import { createPayPalGateway } from "./paypal.ts";
 import { startPoller } from "./poller.ts";
+import { seedSampleCompanies } from "./seed.ts";
 
 const POLLER_INTERVAL_MS = 2000;
 
@@ -17,6 +18,7 @@ function requireEnv(name: string): string {
 
 const db = drizzle(requireEnv("DATABASE_URL"), { schema, casing: "snake_case" });
 await migrate(db, { migrationsFolder: "./drizzle" });
+console.log(`Added ${await seedSampleCompanies(db)} sample companies`);
 
 const paypalClientId = requireEnv("PAYPAL_CLIENT_ID");
 const payments = createPayPalGateway({

@@ -9,7 +9,7 @@ const MIN_WORDS = 12;
 const MIN_FUNCTION_WORDS = 4;
 
 const FUNCTION_WORDS = new Set(
-  "a an the and but or so because for of to in on at with from by as is are was were be been has have had do does did not no your you we our us this that it its which who what there".split(
+  "a an the and but or so because for of to in on at into with from by as is are was were be been has have had do does did not no can will would could should your you we our us they their them he she his her i my this that these those it its which who what when where how there than then also each every all any some".split(
     " ",
   ),
 );
@@ -41,10 +41,10 @@ export interface FeedbackChecker {
 }
 
 // Keyword lists have almost no small joining words, while written sentences do.
-export function readsAsSentences(feedback: string): boolean {
-  const words = feedback.toLowerCase().match(/[a-z']+/g) ?? [];
+export function readsAsSentences(text: string, minFunctionWords = MIN_FUNCTION_WORDS): boolean {
+  const words = text.toLowerCase().match(/[a-z']+/g) ?? [];
   const functionWords = words.filter((word) => FUNCTION_WORDS.has(word)).length;
-  return words.length >= MIN_WORDS && functionWords >= MIN_FUNCTION_WORDS;
+  return words.length >= MIN_WORDS && functionWords >= minFunctionWords;
 }
 
 function cosine(a: number[], b: number[]): number {
