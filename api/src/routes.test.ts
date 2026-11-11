@@ -26,8 +26,21 @@ const payments = {
   loginUrl: vi.fn(),
   getLoginProfile: vi.fn(),
 };
-const feedback = { check: vi.fn() };
+const feedback = { check: vi.fn(), matchScore: vi.fn() };
 const checkWebsite = vi.fn();
+
+function buildApp(demoModeEnabled: boolean) {
+  return createApp({
+    db,
+    payments,
+    feedback,
+    paypalClientId: "CLIENT-ID",
+    checkWebsite,
+    sessionSecret: "test-secret",
+    appUrl: "https://quidly.test",
+    demoModeEnabled,
+  });
+}
 
 async function login(role: "CANDIDATE" | "RECRUITER", email: string) {
   const companyName = role === "RECRUITER" ? `Company ${email}` : null;
@@ -82,17 +95,9 @@ beforeEach(async () => {
   payments.refundCapture.mockResolvedValue({ status: "COMPLETED" });
   checkWebsite.mockResolvedValue(true);
   feedback.check.mockResolvedValue({ passed: true, qualityScore: 0.6 });
+  feedback.matchScore.mockResolvedValue(0.52);
 
-  app = createApp({
-    db,
-    payments,
-    feedback,
-    paypalClientId: "CLIENT-ID",
-    checkWebsite,
-    sessionSecret: "test-secret",
-    appUrl: "https://quidly.test",
-    demoModeEnabled: false,
-  });
+  app = buildApp(false);
   await app.ready();
 
   recruiterCookie = (await login("RECRUITER", "hr@example.com")).cookie;
@@ -321,6 +326,25 @@ describe("applying", () => {
     expect(payments.voidAuthorization).not.toHaveBeenCalled();
   });
 
+  it("stores how closely the resume matches the role", async () => {
+    const jobId = await fundedJob();
+    const response = await post(`/api/jobs/${jobId}/applications`, candidateCookie, applyBody);
+    expect(response.json().elasticMatchScore).toBe(0.52);
+    expect(feedback.matchScore).toHaveBeenCalledWith({
+      resumeText: applyBody.resumeText,
+      jobText: "Senior Backend Engineer\nGo, Postgres, Kubernetes\n",
+    });
+  });
+
+  it("keeps the application when the match score fails", async () => {
+    const jobId = await fundedJob();
+    feedback.matchScore.mockRejectedValue(new Error("Elastic is down"));
+    const response = await post(`/api/jobs/${jobId}/applications`, candidateCookie, applyBody);
+    expect(response.statusCode).toBe(201);
+    expect(response.json().elasticMatchScore).toBeNull();
+    expect(payments.voidAuthorization).not.toHaveBeenCalled();
+  });
+
   it("refuses Demo Mode when it's turned off", async () => {
     const jobId = await fundedJob();
     const response = await post(`/api/jobs/${jobId}/applications`, candidateCookie, {
@@ -437,6 +461,48 @@ describe("responding to an application", () => {
   });
 });
 
+describe("the demo deadline", () => {
+  async function application(): Promise<string> {
+    const jobId = await fundedJob();
+    const response = await post(`/api/jobs/${jobId}/applications`, candidateCookie, applyBody);
+    return response.json().id;
+  }
+
+  it("is refused when Demo Mode is turned off", async () => {
+    const id = await application();
+    const response = await post(`/api/applications/${id}/demo-deadline`, recruiterCookie);
+    expect(response.statusCode).toBe(403);
+  });
+
+  it("moves the deadline to 45 seconds from now", async () => {
+    const id = await application();
+    const demoApp = buildApp(true);
+    const response = await demoApp.inject({
+      method: "POST",
+      url: `/api/applications/${id}/demo-deadline`,
+      headers: { cookie: recruiterCookie },
+    });
+    expect(response.statusCode).toBe(200);
+    const left = new Date(response.json().expiresAt).getTime() - Date.now();
+    expect(left).toBeGreaterThan(40_000);
+    expect(left).toBeLessThanOrEqual(45_000);
+  });
+
+  it("only works on the recruiter's own open applications", async () => {
+    const id = await application();
+    const demoApp = buildApp(true);
+    const other = await login("RECRUITER", "other-hr@example.com");
+    const send = (cookie: string) =>
+      demoApp.inject({ method: "POST", url: `/api/applications/${id}/demo-deadline`, headers: { cookie } });
+
+    expect((await send(other.cookie)).statusCode).toBe(404);
+    expect((await send(candidateCookie)).statusCode).toBe(403);
+    expect((await send(recruiterCookie)).statusCode).toBe(200);
+    // Already due within 45 seconds, so it can't be moved again.
+    expect((await send(recruiterCookie)).statusCode).toBe(409);
+  });
+});
+
 describe("listing roles and applications", () => {
   function get(url: string, cookie?: string) {
     return app.inject({ method: "GET", url, headers: cookie ? { cookie } : {} });
@@ -459,7 +525,11 @@ describe("listing roles and applications", () => {
     expect((await get("/api/my/jobs", other.cookie)).json()).toEqual([]);
 
     const applied = (await get("/api/my/applications", candidateCookie)).json();
-    expect(applied[0]).toMatchObject({ jobTitle: "Senior Backend Engineer", status: "ACTIVE" });
+    expect(applied[0]).toMatchObject({
+      jobTitle: "Senior Backend Engineer",
+      companyName: "Company hr@example.com",
+      status: "ACTIVE",
+    });
     expect((await get("/api/my/applications", recruiterCookie)).statusCode).toBe(403);
   });
 });

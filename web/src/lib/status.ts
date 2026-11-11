@@ -52,3 +52,13 @@ export function jobStatus(status: string): Status {
   if (status === "CLOSED") return { label: "Closed", tone: "neutral" };
   return { label: "Not paid yet", tone: "warn" };
 }
+
+// Bands set from real Elastic scores: a strong backend resume scored 0.63 against
+// a backend role, a frontend one 0.44 and an unrelated nursing one 0.25.
+export function matchLevel(score: number | null): { label: string; bars: number } | null {
+  if (score === null) return null;
+  if (score >= 0.6) return { label: "Strong", bars: 4 };
+  if (score >= 0.5) return { label: "Good", bars: 3 };
+  if (score >= 0.4) return { label: "Partial", bars: 2 };
+  return { label: "Weak", bars: 1 };
+}

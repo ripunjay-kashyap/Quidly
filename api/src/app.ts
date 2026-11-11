@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import cookie from "@fastify/cookie";
-import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNotNull, sql } from "drizzle-orm";
 import Fastify, { type FastifyRequest } from "fastify";
 import {
   assertCanApply,
@@ -24,6 +24,7 @@ const BOND_PER_APPLICANT = 5;
 const HOLD_AMOUNT = "2.00";
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const LOGIN_STATE_MAX_AGE_SECONDS = 10 * 60;
+const DEMO_DEADLINE_MS = 45 * 1000;
 
 class HttpError extends Error {
   readonly statusCode: number;
@@ -309,12 +310,13 @@ export function createApp(deps: {
   app.get("/api/my/applications", async (request) => {
     const candidate = await requireUser(request, "CANDIDATE");
     const rows = await db
-      .select({ application: applications, jobTitle: jobs.title })
+      .select({ application: applications, jobTitle: jobs.title, companyName: users.companyName })
       .from(applications)
       .innerJoin(jobs, eq(applications.jobId, jobs.id))
+      .innerJoin(users, eq(jobs.recruiterId, users.id))
       .where(eq(applications.candidateId, candidate.id))
       .orderBy(asc(applications.createdAt));
-    return rows.map((row) => ({ ...row.application, jobTitle: row.jobTitle }));
+    return rows.map((row) => ({ ...row.application, jobTitle: row.jobTitle, companyName: row.companyName }));
   });
 
   app.get<{ Querystring: { role: "CANDIDATE" | "RECRUITER" } }>(
@@ -538,13 +540,33 @@ export function createApp(deps: {
           demoMode,
           now: new Date(),
         });
-        return reply.status(201).send(application);
+        return reply.status(201).send(await scoreMatch(application, request));
       } catch (error) {
         if (error instanceof ConflictError) await payments.voidAuthorization(hold.authorizationId);
         throw error;
       }
     },
   );
+
+  // Ranks the recruiter's queue. The application stands without a score if Elastic fails.
+  async function scoreMatch(application: typeof applications.$inferSelect, request: FastifyRequest) {
+    try {
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, application.jobId));
+      const score = await deps.feedback.matchScore({
+        resumeText: application.resumeText,
+        jobText: `${job.title}\n${job.requirementsText}\n${job.description}`,
+      });
+      const [scored] = await db
+        .update(applications)
+        .set({ elasticMatchScore: score })
+        .where(eq(applications.id, application.id))
+        .returning();
+      return scored;
+    } catch (error) {
+      request.log.error(error);
+      return application;
+    }
+  }
 
   const idParams = {
     type: "object",
@@ -614,6 +636,30 @@ export function createApp(deps: {
       const interviewAt = new Date(request.body.interviewAt);
       if (interviewAt <= now) throw new HttpError(422, "Pick an interview time in the future");
       return inviteToInterview(db, { id: application.id, interviewAt, now });
+    },
+  );
+
+  // Demo Mode only: lets a recruiter show the no-reply payout without waiting 72 hours.
+  app.post<{ Params: { id: string } }>(
+    "/api/applications/:id/demo-deadline",
+    { schema: { params: idParams } },
+    async (request) => {
+      if (!demoModeEnabled) throw new HttpError(403, "Demo Mode is turned off");
+      const { application } = await recruiterApplication(request);
+      const deadline = new Date(Date.now() + DEMO_DEADLINE_MS);
+      const [updated] = await db
+        .update(applications)
+        .set({ expiresAt: deadline })
+        .where(
+          and(
+            eq(applications.id, application.id),
+            eq(applications.status, "ACTIVE"),
+            gt(applications.expiresAt, deadline),
+          ),
+        )
+        .returning();
+      if (!updated) throw new ConflictError("This application is already due within 45 seconds or answered");
+      return updated;
     },
   );
 

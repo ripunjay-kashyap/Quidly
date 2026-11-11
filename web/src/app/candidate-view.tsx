@@ -22,11 +22,19 @@ import { candidateStatus } from "@/lib/status";
 import { PageSkeleton, Skeleton, SlotPips, StatCard, StatusBadge } from "@/lib/ui";
 import { useNow } from "@/lib/use-now";
 import { useSession } from "@/lib/use-session";
+import { receipt } from "./_home/ascii";
 import { CandidateProfileForm } from "./candidate-profile-form";
 
-type MyApplication = Application & { jobTitle: string };
+type MyApplication = Application & { jobTitle: string; companyName: string | null };
 
 const PAYOUT = 5;
+
+// "11/03 09:41", in the viewer's time zone.
+function receiptDate(iso: string): string {
+  const date = new Date(iso);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 const ANSWERED = ["REJECTED_RELEASED", "INTERVIEW_PENDING", "INTERVIEW_CONFIRMED", "DISPUTED"];
 
 export function CandidateDashboard() {
@@ -372,6 +380,22 @@ function ApplicationCard({
             "The company didn't reply in time. $5 is on its way to your PayPal."}
           {application.payoutStatus === "FAILED" &&
             "The company didn't reply in time, but the $5 payment to your PayPal failed."}
+        </div>
+      )}
+      {application.status === "GHOSTED_PAID_OUT" && application.payoutStatus !== "FAILED" && (
+        <div className="receipt-shadow mt-5 w-fit">
+          <pre className="receipt ascii bg-white px-4 pt-5 pb-6 text-[11px] text-foreground">
+            {receipt({
+              company: application.companyName ?? "",
+              role: application.jobTitle,
+              applied: receiptDate(application.createdAt),
+              due: receiptDate(application.expiresAt),
+              payment: {
+                status: application.payoutStatus === "SUCCESS" ? "paid" : "sending",
+                batchId: application.payoutBatchId,
+              },
+            })}
+          </pre>
         </div>
       )}
     </article>

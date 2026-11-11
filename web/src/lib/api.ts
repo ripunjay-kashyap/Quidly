@@ -71,6 +71,8 @@ export type Application = {
   unmetRequirement: string | null;
   recruiterFeedback: string | null;
   payoutStatus: string | null;
+  payoutBatchId: string | null;
+  elasticMatchScore: number | null;
   createdAt: string;
 };
 

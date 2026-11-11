@@ -93,21 +93,40 @@ const RECEIPT_WIDTH = 26;
 const rule = "-".repeat(RECEIPT_WIDTH);
 const row = (label: string, value: string) => label + value.padStart(RECEIPT_WIDTH - label.length);
 
-export const payoutReceipt = [
-  line(at(RECEIPT_WIDTH / 2, "QUIDLY  PAYOUT")),
-  rule,
-  "Kestrel Mutual",
-  "Claims Analyst",
-  "",
-  row("applied", "11/03 09:41"),
-  row("reply due", "11/06 09:41"),
-  row("company replied", "no"),
-  rule,
-  row("PAID TO YOU", "$5.00"),
-  "via PayPal",
-  rule,
-  line(at(RECEIPT_WIDTH / 2, "thanks for applying")),
-].join("\n");
+// The receipt a candidate gets when a company doesn't reply in time.
+export function receipt(input: {
+  company: string;
+  role: string;
+  applied: string;
+  due: string;
+  payment?: { status: string; batchId: string | null };
+}): string {
+  const fit = (text: string) => (text.length > RECEIPT_WIDTH ? `${text.slice(0, RECEIPT_WIDTH - 1)}…` : text);
+  return [
+    line(at(RECEIPT_WIDTH / 2, "QUIDLY  PAYOUT")),
+    rule,
+    fit(input.company),
+    fit(input.role),
+    "",
+    row("applied", input.applied),
+    row("reply due", input.due),
+    row("company replied", "no"),
+    rule,
+    row("PAID TO YOU", "$5.00"),
+    "via PayPal",
+    ...(input.payment ? [row("status", input.payment.status)] : []),
+    ...(input.payment?.batchId ? [row("payout id", input.payment.batchId.slice(0, 16))] : []),
+    rule,
+    line(at(RECEIPT_WIDTH / 2, "thanks for applying")),
+  ].join("\n");
+}
+
+export const payoutReceipt = receipt({
+  company: "Kestrel Mutual",
+  role: "Claims Analyst",
+  applied: "11/03 09:41",
+  due: "11/06 09:41",
+});
 
 // A static "72:00:00" for the closing section.
 export const fullClock = bigClock("72:00:00").split("\n").slice(0, 5).join("\n");

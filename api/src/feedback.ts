@@ -38,6 +38,8 @@ export type FeedbackVerdict =
 
 export interface FeedbackChecker {
   check(input: { feedback: string; resumeText: string; requirementsText: string }): Promise<FeedbackVerdict>;
+  // How closely a resume matches a role, as the cosine of their embeddings.
+  matchScore(input: { resumeText: string; jobText: string }): Promise<number>;
 }
 
 // Keyword lists have almost no small joining words, while written sentences do.
@@ -119,6 +121,11 @@ export function createElasticFeedbackChecker(config: { url: string; apiKey: stri
         };
       }
       return { passed: true, qualityScore: fit };
+    },
+
+    async matchScore({ resumeText, jobText }) {
+      const [resumeVector, jobVector] = await Promise.all([embed(resumeText), embed(jobText)]);
+      return cosine(resumeVector, jobVector);
     },
   };
 }

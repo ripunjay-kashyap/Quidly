@@ -23,6 +23,7 @@ import { CompanyAvatar, PageSkeleton, Skeleton, StatCard, StatusBadge } from "@/
 import { useNow } from "@/lib/use-now";
 import { useSession } from "@/lib/use-session";
 import { CompanyProfileForm } from "./company-profile-form";
+import { MatchMeter, ReplyQueue } from "./reply-queue";
 
 type Job = {
   id: string;
@@ -95,9 +96,15 @@ function CompanySetup({ config, onSaved }: { config: Config; onSaved: () => void
 function RecruiterView({ user, config, onProfileSaved }: { user: User; config: Config; onProfileSaved: () => void }) {
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
-  const [tab, setTab] = useState<"roles" | "profile">("roles");
+  const [chosenTab, setTab] = useState<"queue" | "roles" | "profile" | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const replyPanel = useRef<HTMLElement>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const now = useNow();
+
+  useEffect(() => {
+    if (selectedId) replyPanel.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [selectedId]);
 
   const refresh = useCallback(() => {
     get<Job[]>("/api/my/jobs")
@@ -126,6 +133,9 @@ function RecruiterView({ user, config, onProfileSaved }: { user: User; config: C
   );
   const paidOut = roles.reduce((sum, job) => sum + Number(job.bondForfeited), 0);
   const showComposer = composerOpen || (jobs !== null && roles.length === 0);
+  const tab = chosenTab ?? (applications.length > 0 ? "queue" : "roles");
+  const selectedJob = roles.find((job) => job.applications.some((application) => application.id === selectedId));
+  const selectedIndex = selectedJob?.applications.findIndex((application) => application.id === selectedId) ?? -1;
 
   return (
     <main className="flex flex-1 flex-col">
@@ -186,9 +196,12 @@ function RecruiterView({ user, config, onProfileSaved }: { user: User; config: C
 
       <div className="container-page flex flex-1 flex-col gap-6 py-8">
         <div className="tabs" role="tablist">
-          <button role="tab" className="tab" aria-selected={tab === "roles"} onClick={() => setTab("roles")}>
-            Roles and applicants
+          <button role="tab" className="tab" aria-selected={tab === "queue"} onClick={() => setTab("queue")}>
+            Reply queue
             {waiting.length > 0 && <span className="badge badge-warn">{waiting.length} waiting</span>}
+          </button>
+          <button role="tab" className="tab" aria-selected={tab === "roles"} onClick={() => setTab("roles")}>
+            Roles
           </button>
           <button role="tab" className="tab" aria-selected={tab === "profile"} onClick={() => setTab("profile")}>
             Company profile
@@ -203,6 +216,38 @@ function RecruiterView({ user, config, onProfileSaved }: { user: User; config: C
         )}
 
         {tab === "profile" && <CompanyProfileForm config={config} onSaved={onProfileSaved} />}
+
+        {tab === "queue" && (
+          <>
+            {jobs === null ? (
+              <Skeleton className="h-64 rounded-2xl" />
+            ) : (
+              <ReplyQueue
+                jobs={roles}
+                now={now}
+                demoModeEnabled={config.demoModeEnabled}
+                onSelect={setSelectedId}
+                onChange={refresh}
+              />
+            )}
+            {selectedJob && selectedIndex >= 0 && (
+              <section ref={replyPanel} className="card scroll-mt-24 overflow-hidden">
+                <p className="border-b border-border px-5 py-3 text-sm text-muted sm:px-6">{selectedJob.title}</p>
+                <ul>
+                  <ApplicantRow
+                    key={selectedId}
+                    number={selectedIndex + 1}
+                    application={selectedJob.applications[selectedIndex]}
+                    requirements={splitRequirements(selectedJob.requirementsText)}
+                    now={now}
+                    onChange={refresh}
+                    startReplying
+                  />
+                </ul>
+              </section>
+            )}
+          </>
+        )}
 
         {tab === "roles" && (
           <>
@@ -498,15 +543,17 @@ function ApplicantRow({
   requirements,
   now,
   onChange,
+  startReplying = false,
 }: {
   number: number;
   application: Application;
   requirements: string[];
   now: number;
   onChange: () => void;
+  startReplying?: boolean;
 }) {
   const [showResume, setShowResume] = useState(false);
-  const [replying, setReplying] = useState(false);
+  const [replying, setReplying] = useState(startReplying);
   const [mode, setMode] = useState<"feedback" | "invite">("feedback");
   const [requirement, setRequirement] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -535,6 +582,9 @@ function ApplicantRow({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="font-medium">Applicant {number}</span>
         <StatusBadge {...recruiterStatus(application)} />
+        <span className="text-sm">
+          <MatchMeter score={application.elasticMatchScore} />
+        </span>
         {active && left !== null && (
           <span
             className={`flex items-center gap-1.5 text-sm tabular-nums ${

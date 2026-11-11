@@ -534,9 +534,13 @@
     display: flex;
     gap: 1.5rem;
     border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
   }
   .tab {
     position: relative;
+    flex-shrink: 0;
+    white-space: nowrap;
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
@@ -554,7 +558,7 @@
   .tab[aria-selected="true"]::after {
     content: "";
     position: absolute;
-    inset: auto 0 -1px 0;
+    inset: auto 0 0 0;
     height: 2px;
     border-radius: 2px;
     background: var(--accent);
@@ -574,6 +578,59 @@
     background: var(--accent);
     transform-origin: left;
     transition: transform 500ms var(--ease-out);
+  }
+
+  /* Elastic match level: four bars and a word */
+  .match {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 500;
+  }
+  .match-bars {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 0.875rem;
+  }
+  .match-bars > span {
+    width: 4px;
+    border-radius: 1px;
+    background: var(--border-strong);
+  }
+  .match-bars > span:nth-child(1) {
+    height: 40%;
+  }
+  .match-bars > span:nth-child(2) {
+    height: 60%;
+  }
+  .match-bars > span:nth-child(3) {
+    height: 80%;
+  }
+  .match-bars > span:nth-child(4) {
+    height: 100%;
+  }
+  .match-bars > span[data-on] {
+    background: var(--accent);
+  }
+
+  /* Deposit at risk counter in the reply queue */
+  .risk {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    min-width: 15rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    background: var(--surface-2);
+  }
+  .risk-live {
+    border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+    background: var(--danger-soft);
+  }
+  .risk-live > :nth-child(2) {
+    color: var(--danger);
   }
 
   .skeleton {
@@ -697,4 +754,12 @@
   .chip:active {
     transform: none;
   }
+}
+
+/* Outside the layers so they beat AG Grid's own row styles. */
+.ag-row.queue-row-soon {
+  background-color: var(--warn-soft);
+}
+.ag-row.queue-row-due {
+  background-color: var(--danger-soft);
 }
