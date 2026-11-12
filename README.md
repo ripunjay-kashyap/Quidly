@@ -6,6 +6,8 @@ Companies on Quidly put down a refundable $5 deposit for every applicant. They h
 
 **Live site:** https://quidly-theta.vercel.app
 
+**Demo video (2:44):** https://youtu.be/hpFs0qBbj3E
+
 PayPal runs in sandbox mode, so no real money moves. Judges: the sandbox logins are in the Devpost testing instructions.
 
 ![The Quidly landing page: every application gets an answer](assets/landing.jpg)
