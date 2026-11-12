@@ -23,6 +23,7 @@ const columns = [
 const builtWith = [
   { name: "PayPal", role: "Login, holds and payouts" },
   { name: "Elastic", role: "AI feedback checks" },
+  { name: "AG Grid", role: "Reply queue" },
   { name: "Render", role: "Backend" },
   { name: "Vercel", role: "Website" },
 ];

@@ -220,6 +220,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               onApprove={async (orderId) => {
                 await post(`/api/jobs/${role.id}/applications`, { orderId, resumeText: resume, demoMode });
                 setApplied(true);
+                setListing({ ...role, applicantCount: role.applicantCount + 1 });
                 refreshUser();
               }}
               onError={setMessage}

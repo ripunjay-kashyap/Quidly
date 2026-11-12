@@ -25,6 +25,7 @@ export function CompanyProfileForm({ config, onSaved }: { config: Config; onSave
   const [saved, setSaved] = useState(false);
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
 
   function show(company: Company) {
     setName(company.companyName ?? "");
@@ -45,6 +46,7 @@ export function CompanyProfileForm({ config, onSaved }: { config: Config; onSave
   async function save() {
     setBusy(true);
     setProblems([]);
+    setJustSaved(false);
     try {
       const response = await fetch("/api/company", {
         method: "PUT",
@@ -57,6 +59,7 @@ export function CompanyProfileForm({ config, onSaved }: { config: Config; onSave
         return;
       }
       show(data);
+      setJustSaved(true);
       onSaved();
     } catch (error) {
       setProblems([errorMessage(error)]);
@@ -152,8 +155,16 @@ export function CompanyProfileForm({ config, onSaved }: { config: Config; onSave
         )}
       </div>
 
-      <div className="flex justify-end border-t border-border bg-surface-2 px-6 py-4 sm:px-8">
-        <button className="btn btn-primary" disabled={busy} onClick={save}>
+      <div className="flex flex-col gap-3 border-t border-border bg-surface-2 px-6 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+        <div role="status" className="text-sm">
+          {justSaved && (
+            <span className="flex items-start gap-2 text-success">
+              <Icon name="check-circle" size={16} className="mt-0.5 shrink-0" />
+              Company profile saved.
+            </span>
+          )}
+        </div>
+        <button className="btn btn-primary shrink-0" disabled={busy} onClick={save}>
           {busy ? "Checking…" : "Save company profile"}
         </button>
       </div>
