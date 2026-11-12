@@ -38,7 +38,7 @@ Applying for a job takes hours. Ignoring an applicant costs a company nothing, s
 ## Try it in 2 minutes
 
 1. **Post a role:** on the live site, press "Start hiring" and log in with a company sandbox account. Fill in the company profile, post a role and pay in the PayPal window.
-2. **Apply:** in a private window, press "Start applying" and log in with a job seeker account. Upload a resume PDF and apply. Approve the $2 hold.
+2. **Apply:** in a private window, press "Start applying" and log in with a job seeker account. Upload a resume PDF and apply. Approve the $2 hold. There are 2 sample resumes in [`assets/sample-resumes`](assets/sample-resumes): a backend engineer who matches the default role well, and a data engineer who doesn't.
 3. **Try a lazy rejection:** as the company, open the reply queue and send "Sorry, we went with someone else." The AI check blocks it.
 4. **Let a deadline run out:** press "Skip to 45s" on an applicant and wait. The row turns red, PayPal pays the job seeker $5, and a receipt appears on their dashboard.
 5. **Close the role:** the unused deposit is refunded to the company.
